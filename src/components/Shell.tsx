@@ -16,11 +16,18 @@ export function TitleBar() {
         <Logo size={20} /> MUZICUS
       </div>
       <div className="drag" data-tauri-drag-region onDoubleClick={() => w.toggleMaximize()} />
-      <div className="winbtns">
-        <button title="Свернуть" onClick={() => w.minimize()} />
-        <button title="Развернуть" onClick={() => w.toggleMaximize()} />
-        <button className="close" title="Закрыть" onClick={() => w.close()} />
-      </div>
+      <WinButtons />
+    </div>
+  );
+}
+
+function WinButtons() {
+  const w = getCurrentWindow();
+  return (
+    <div className="winbtns" style={{ marginLeft: 6 }}>
+      <button title="Свернуть" onClick={() => w.minimize()} />
+      <button title="Развернуть" onClick={() => w.toggleMaximize()} />
+      <button className="close" title="Закрыть" onClick={() => w.close()} />
     </div>
   );
 }
@@ -79,15 +86,17 @@ export function MobileHeader() {
   const hist = useUi((s) => s.history.length);
   const canBack = hist > 0 && !["home", "search", "library", "settings"].includes(view.name);
   return (
-    <div className="m-header">
+    // on a narrow desktop window this header replaces the titlebar: keep it draggable with window buttons
+    <div className="m-header" data-tauri-drag-region={!isMobile() || undefined}>
       {canBack ? (
         <button className="icon-btn" onClick={() => useUi.getState().back()}><I.back size={22} /></button>
       ) : (
-        <div className="brand"><Logo size={22} /> MUZICUS</div>
+        <div className="brand" data-tauri-drag-region={!isMobile() || undefined}><Logo size={22} /> MUZICUS</div>
       )}
-      <div className="spacer" />
+      <div className="spacer" data-tauri-drag-region={!isMobile() || undefined} />
       <button className="icon-btn" onClick={() => useUi.getState().set({ importOpen: true })}><I.link size={19} /></button>
       <button className="icon-btn" onClick={() => useUi.getState().go({ name: "downloads" })}><I.download size={19} /></button>
+      {!isMobile() && <WinButtons />}
     </div>
   );
 }

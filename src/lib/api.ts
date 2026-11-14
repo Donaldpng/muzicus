@@ -51,6 +51,7 @@ export const api = {
   download: (id: string, url: string) => invoke<string>("download", { id, url }),
   deleteDownload: (id: string) => invoke<void>("delete_download", { id }),
   listDownloads: () => invoke<string[]>("list_downloads"),
+  scanFiles: () => invoke<Track[]>("scan_files"),
   downloadsDir: () => invoke<string>("downloads_dir"),
   saveUserFile: async (file: File) => {
     const buf = new Uint8Array(await file.arrayBuffer());

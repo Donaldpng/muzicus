@@ -347,6 +347,61 @@ async fn save_cover(st: St<'_>, request: tauri::ipc::Request<'_>) -> Result<Stri
     Ok(format!("f/covers/{name}"))
 }
 
+/// Rebuild track entries for every audio file stored in `files/`.
+/// File names are `<hash>.<ext>` and track ids are `local:<hash>`, so ids come back exactly
+/// as they were — the library can always recover "My files" from disk.
+#[tauri::command]
+async fn scan_files(st: St<'_>) -> Result<Vec<Track>, String> {
+    let dir = st.data_dir.join("files");
+    let covers = st.data_dir.join("covers");
+    tokio::task::spawn_blocking(move || {
+        let mut out = vec![];
+        let Ok(rd) = std::fs::read_dir(&dir) else { return out };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Some((stem, ext)) = name.rsplit_once('.') else { continue };
+            if !matches!(ext.to_lowercase().as_str(), "mp3" | "flac" | "m4a" | "mp4" | "aac" | "ogg" | "oga" | "opus" | "wav" | "webm") {
+                continue;
+            }
+            let tags = read_tags(&e.path());
+            let mut cover = ["jpg", "png"]
+                .iter()
+                .map(|x| format!("{stem}.{x}"))
+                .find(|c| covers.join(c).exists())
+                .map(|c| format!("f/covers/{c}"));
+            let (mut title, mut artist, mut album, mut duration) = (None, None, None, None);
+            if let Some(m) = tags {
+                title = m.title.filter(|s| !s.is_empty());
+                artist = m.artist.filter(|s| !s.is_empty());
+                album = m.album;
+                duration = m.duration;
+                if cover.is_none() {
+                    if let Some((bytes, x)) = m.picture {
+                        let c = format!("{stem}.{x}");
+                        if std::fs::write(covers.join(&c), bytes).is_ok() {
+                            cover = Some(format!("f/covers/{c}"));
+                        }
+                    }
+                }
+            }
+            out.push(Track {
+                id: format!("local:{stem}"),
+                title: title.unwrap_or_else(|| "Без названия".into()),
+                artist: artist.unwrap_or_default(),
+                album,
+                duration,
+                cover,
+                local: Some(name),
+                source: "local".into(),
+                ..Default::default()
+            });
+        }
+        out
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn delete_file(st: St<'_>, rel: String) -> Result<(), String> {
     let rel = rel.trim_start_matches("f/");
@@ -430,6 +485,7 @@ pub fn run() {
             downloads_dir,
             save_user_file,
             save_cover,
+            scan_files,
             delete_file
         ])
         .run(tauri::generate_context!())

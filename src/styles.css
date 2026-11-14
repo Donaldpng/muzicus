@@ -51,6 +51,7 @@
   --f-mono: "JetBrains Mono", ui-monospace, monospace;
   --f-seg: "DSEG7", var(--f-mono);
   --player-h: 92px;
+  --tb-h: 40px;
   --side-w: 248px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
@@ -376,7 +377,7 @@ input[type="range"].range::-webkit-slider-thumb { -webkit-appearance: none; widt
 
 /* ---------- now playing ---------- */
 .np {
-  position: fixed; inset: 0; z-index: 40;
+  position: fixed; inset: var(--tb-h) 0 0 0; z-index: 40;
   background: var(--bg);
   display: grid;
   grid-template-columns: minmax(320px, 0.9fr) 1.1fr;
@@ -484,6 +485,7 @@ input[type="range"].range::-webkit-slider-thumb { -webkit-appearance: none; widt
   }
   .sidebar, .playerbar { display: none; }
   .titlebar.desktop-only { display: none; }
+  :root { --tb-h: 0px; }
   .m-header { display: flex; grid-area: title; align-items: center; gap: 10px; padding: calc(10px + var(--safe-t)) 16px 10px; border-bottom: 1.5px solid var(--soft); background: var(--bg); }
   .m-header .brand { font-family: var(--f-head); font-weight: 700; font-size: 15px; letter-spacing: 0.06em; display: flex; gap: 8px; align-items: center; }
   .page { padding: 18px 16px 30px; }
@@ -525,3 +527,6 @@ input[type="range"].range::-webkit-slider-thumb { -webkit-appearance: none; widt
   .eq-band input { height: 140px; }
   .update-banner { top: auto; bottom: 150px; right: 10px; left: 10px; }
 }
+
+/* Android: no custom titlebar */
+:root.is-mobile { --tb-h: 0px; }

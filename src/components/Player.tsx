@@ -216,7 +216,7 @@ export function NowPlaying() {
   const setMode = (m: VisMode) => useSettings.getState().set({ vis: { ...useSettings.getState().vis, mode: m } });
   return (
     <div className="np has-panel">
-      <div className="np-top">
+      <div className="np-top" data-tauri-drag-region>
         <button className="icon-btn" onClick={close}><I.down size={22} /></button>
         <div className="grow">
           <div className="label">Сейчас играет</div>

@@ -137,4 +137,18 @@ export async function loadLibrary() {
       api.saveState("library", JSON.stringify({ tracks: kept, playlists, liked, localIds, history })).catch(console.error);
     }, 600);
   });
+  // self-heal "My files": any audio file on disk that the library lost track of comes back
+  try {
+    const onDisk = await api.scanFiles();
+    const s = useLib.getState();
+    const missing = onDisk.filter((t) => !s.localIds.includes(t.id));
+    if (missing.length) {
+      const tracks = { ...s.tracks };
+      for (const t of missing) tracks[t.id] = { ...t, ...tracks[t.id], local: t.local, source: "local" };
+      useLib.setState({ tracks, localIds: [...s.localIds, ...missing.map((t) => t.id)] });
+    }
+  } catch (e) {
+    console.warn("scan files", e);
+  }
+
 }

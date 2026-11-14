@@ -15,7 +15,7 @@ import "@fontsource/jetbrains-mono/cyrillic-500.css";
 import segUrl from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2?url";
 import "./styles.css";
 import App from "./App";
-import { initApi } from "./lib/api";
+import { initApi, isMobile } from "./lib/api";
 import { loadLibrary } from "./store/library";
 import { loadSettings } from "./store/settings";
 
@@ -24,6 +24,7 @@ seg.load().then((f) => document.fonts.add(f)).catch(() => {});
 
 (async () => {
   await initApi();
+  if (isMobile()) document.documentElement.classList.add("is-mobile");
   await Promise.all([loadSettings(), loadLibrary()]);
   if (import.meta.env.DEV) {
     const [{ usePlayer }, { useLib }, { useUi }, { engine }] = await Promise.all([
