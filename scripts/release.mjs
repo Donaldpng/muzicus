@@ -24,7 +24,7 @@ fs.writeFileSync("src-tauri/Cargo.toml", cargo);
 
 const run = (c) => execSync(c, { stdio: "inherit" });
 run("cd src-tauri && cargo update -p muzicus --offline || exit 0");
-run("git add -A");
+run("git add -u");
 run(`git commit -m "release: v${version}" -m "${notes.replace(/"/g, "'")}"`);
 run(`git tag v${version}`);
 run("git push");

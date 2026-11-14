@@ -6,3 +6,6 @@ src-tauri/gen/schemas
 *.keystore
 *.jks
 .DS_Store
+*.exe
+*.apk
+*.msi
