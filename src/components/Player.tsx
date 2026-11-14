@@ -117,6 +117,7 @@ const SRC_NAMES: Record<string, string> = {
   archive: "Internet Archive",
   jamendo: "Jamendo",
   soundcloud: "SoundCloud",
+  scwidget: "SoundCloud · плеер",
   preview: "Превью 30 с",
 };
 

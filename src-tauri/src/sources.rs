@@ -408,6 +408,65 @@ impl Sources {
         }
     }
 
+    pub fn sc_configured(&self) -> bool {
+        let c = self.cfg();
+        c.soundcloud && !c.sc_id.trim().is_empty() && !c.sc_secret.trim().is_empty()
+    }
+
+    /// SoundCloud-only search via the official API (needs app credentials).
+    pub async fn sc_search(&self, q: &str) -> Result<Vec<Track>, String> {
+        if !self.sc_configured() {
+            return Err("NO_KEYS".into());
+        }
+        self.sc_token().await.ok_or("SoundCloud: ключи не подошли — проверьте Client ID и Secret")?;
+        Ok(self
+            .soundcloud_raw(q, 50)
+            .await
+            .iter()
+            .filter_map(|t| {
+                let src = Self::sc_src(t)?;
+                Some(Track {
+                    id: format!("sc:{}", src.id.rsplit(':').next().unwrap_or("")),
+                    title: src.title.clone(),
+                    artist: src.artist.clone(),
+                    duration: src.duration,
+                    cover: t["artwork_url"].as_str().map(|u| u.replace("-large", "-t500x500")),
+                    source: "soundcloud".into(),
+                    src: Some(src),
+                    ..Default::default()
+                })
+            })
+            .collect())
+    }
+
+    /// Metadata for a SoundCloud link via the official oEmbed endpoint (no key needed).
+    pub async fn sc_oembed(&self, url: &str) -> Result<Track, String> {
+        let u = url.trim().split('?').next().unwrap_or("").trim_end_matches('/').to_string();
+        if !u.starts_with("https://soundcloud.com/") && !u.starts_with("https://on.soundcloud.com/") && !u.starts_with("https://m.soundcloud.com/") {
+            return Err("Это не ссылка на SoundCloud".into());
+        }
+        let u = u.replace("https://m.soundcloud.com/", "https://soundcloud.com/");
+        let v = self
+            .json(&format!("https://soundcloud.com/oembed?format=json&url={}", urlencoding::encode(&u)))
+            .await
+            .map_err(|_| "SoundCloud: трек не найден или закрыт".to_string())?;
+        let author = s(&v["author_name"]);
+        let raw_title = s(&v["title"]);
+        let title = raw_title
+            .strip_suffix(&format!(" by {author}"))
+            .map(String::from)
+            .unwrap_or(raw_title);
+        Ok(Track {
+            id: stable_id("scw", &u),
+            title,
+            artist: author,
+            cover: v["thumbnail_url"].as_str().map(String::from),
+            scw: Some(u),
+            source: "soundcloud".into(),
+            ..Default::default()
+        })
+    }
+
     /// Final playable mp3 URL + auth header for a `sc:` source.
     pub async fn sc_stream(&self, urn: &str) -> Result<(String, String), String> {
         let tok = self.sc_token().await.ok_or("SoundCloud не настроен")?;

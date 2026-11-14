@@ -25,6 +25,9 @@ pub struct Track {
     /// Resolved playable source
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<Source>,
+    /// SoundCloud page URL played through the official embedded widget (no API key)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scw: Option<String>,
     /// Where the track came from: deezer | local | audius | archive | jamendo | soundcloud | spotify | yt | text …
     pub source: String,
 }

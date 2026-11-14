@@ -7,6 +7,7 @@ import { useUi } from "./store/ui";
 import { ContextMenu, ImportModal, Toasts } from "./components/Overlays";
 import { MiniPlayer, NowPlaying, PlayerBar } from "./components/Player";
 import { MobileHeader, MobileNav, Sidebar, TitleBar, UpdateBanner } from "./components/Shell";
+import { ScWidgetHost } from "./components/ScWidgetHost";
 import { Home } from "./views/Home";
 import { Library, ListView } from "./views/Library";
 import { Search } from "./views/Search";
@@ -102,6 +103,7 @@ export default function App() {
       <MiniPlayer />
       <MobileNav />
       <NowPlaying />
+      <ScWidgetHost />
       <ImportModal />
       <ContextMenu />
       <Toasts />

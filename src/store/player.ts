@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { engine } from "../audio/engine";
+import { scwActive, scwLoad, scwSeek, scwStop, scwToggle, scwVolume } from "../audio/scwidget";
 import { api, shuffleArr, trackUrl } from "../lib/api";
 import type { QueueContext, Repeat, Track } from "../lib/types";
 import { useLib } from "./library";
@@ -87,6 +88,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   toggle: () => {
     const a = engine.audio;
     if (get().index < 0) return;
+    if (scwActive()) return scwToggle();
     engine.ensureGraph();
     if (!a.src) return load(true);
     if (a.paused) a.play().catch(() => {});
@@ -97,6 +99,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const { queue, index, repeat } = get();
     if (!queue.length) return;
     if (auto && repeat === "one") {
+      if (scwActive()) return load(true);
       engine.audio.currentTime = 0;
       engine.audio.play().catch(() => {});
       return;
@@ -130,6 +133,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   seek: (t) => {
+    if (scwActive()) {
+      scwSeek(t);
+      return set({ position: t });
+    }
     const a = engine.audio;
     if (isFinite(t)) a.currentTime = Math.max(0, Math.min(t, a.duration || t));
     set({ position: a.currentTime });
@@ -238,6 +245,29 @@ async function load(autoplay: boolean) {
   engine.ensureGraph();
   usePlayer.setState({ loading: true, position: 0, duration: t0.duration ?? 0, buffered: 0 });
   a.pause();
+  // SoundCloud link without API key → official embedded player
+  if (t0.scw && !t0.local && !isDownloaded(t0)) {
+    a.removeAttribute("src");
+    a.load();
+    usePlayer.setState({ sourceLabel: "scwidget" });
+    useLib.getState().pushHistory(t0.id);
+    updateMediaSession(t0);
+    scwVolume(useSettings.getState().volume);
+    scwLoad(t0.scw, {
+      onPlay: () => seq === loadSeq && usePlayer.setState({ playing: true, loading: false }),
+      onPause: () => seq === loadSeq && usePlayer.setState({ playing: false }),
+      onProgress: (p, d) => seq === loadSeq && usePlayer.setState({ position: p, duration: d || usePlayer.getState().duration, buffered: d }),
+      onFinish: () => seq === loadSeq && usePlayer.getState().next(true),
+      onError: () => {
+        if (seq !== loadSeq) return;
+        usePlayer.setState({ loading: false, playing: false });
+        toast("SoundCloud: трек недоступен для встраивания", "err");
+        skipOnError(seq);
+      },
+    });
+    return;
+  }
+  scwStop();
   const t = await ensurePlayable(t0);
   if (seq !== loadSeq) return;
   const url = t && trackUrl(t, isDownloaded(t));
@@ -347,3 +377,8 @@ if ("mediaSession" in navigator) {
     ms.setActionHandler("seekto", (d) => d.seekTime != null && P().seek(d.seekTime));
   } catch {}
 }
+
+// keep the SoundCloud widget volume in sync with the app volume
+useSettings.subscribe((s, p) => {
+  if (s.volume !== p.volume) scwVolume(s.volume);
+});

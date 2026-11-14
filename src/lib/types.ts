@@ -13,6 +13,8 @@ export interface Track {
   dz?: number;
   /** resolved playable source */
   src?: Source;
+  /** SoundCloud page URL played through the official embedded widget */
+  scw?: string;
   source: string;
 }
 

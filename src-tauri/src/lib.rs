@@ -110,6 +110,16 @@ async fn radio(st: St<'_>, dz: Option<u64>, artist: Option<String>) -> Result<Ve
 }
 
 #[tauri::command]
+async fn sc_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
+    st.sources.sc_search(&query).await
+}
+
+#[tauri::command]
+async fn sc_oembed(st: St<'_>, url: String) -> Result<Track, String> {
+    st.sources.sc_oembed(&url).await
+}
+
+#[tauri::command]
 async fn suggest(st: St<'_>, query: String) -> Result<Vec<String>, String> {
     st.yt.suggest(&query).await
 }
@@ -423,6 +433,8 @@ pub fn run() {
             set_sources,
             search,
             open_search,
+            sc_search,
+            sc_oembed,
             chart,
             radio,
             suggest,
