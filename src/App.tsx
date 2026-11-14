@@ -66,11 +66,21 @@ function useHotkeys() {
       }
     };
     window.addEventListener("keydown", onKey);
+    // A lone Alt press makes WebView2 hand the key to the window as a menu accelerator:
+    // Windows enters "menu mode" and swallows the next keystroke, so Shift+Alt layout
+    // switching needed two presses. Marking Alt as handled keeps it inside the page.
+    const eatAlt = (e: KeyboardEvent) => {
+      if (e.key === "Alt" || e.key === "AltGraph") e.preventDefault();
+    };
+    window.addEventListener("keydown", eatAlt, true);
+    window.addEventListener("keyup", eatAlt, true);
     // mouse "back" button
     const onMouse = (e: MouseEvent) => e.button === 3 && useUi.getState().back();
     window.addEventListener("mouseup", onMouse);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", eatAlt, true);
+      window.removeEventListener("keyup", eatAlt, true);
       window.removeEventListener("mouseup", onMouse);
     };
   }, []);
