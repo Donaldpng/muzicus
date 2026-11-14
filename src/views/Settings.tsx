@@ -24,14 +24,11 @@ function SourcesCard() {
   const src = useSettings((s) => s.sources);
   const set = useSettings((s) => s.set);
   const up = (p: Partial<typeof src>) => set({ sources: { ...src, ...p } });
-  const Row = ({ k, name, desc, link }: { k: "audius" | "archive" | "jamendo" | "soundcloud" | "preview"; name: string; desc: string; link?: string }) => (
+  const Row = ({ k, name, desc }: { k: "audius" | "archive" | "preview"; name: string; desc: string }) => (
     <div className="set-row">
       <div>
         <div style={{ fontWeight: 600 }}>{name}</div>
-        <div className="muted" style={{ fontSize: 12 }}>
-          {desc}
-          {link && <> · <a href="#" style={{ color: "var(--accent)" }} onClick={(e) => { e.preventDefault(); openUrl(link); }}>получить ключ</a></>}
-        </div>
+        <div className="muted" style={{ fontSize: 12 }}>{desc}</div>
       </div>
       <Switch on={src[k]} onChange={(v) => up({ [k]: v })} />
     </div>
@@ -45,15 +42,6 @@ function SourcesCard() {
         </div>
         <Row k="audius" name="Audius" desc="Открытая платформа артистов, ключ не нужен" />
         <Row k="archive" name="Internet Archive" desc="Общественное достояние, архивы, концерты" />
-        <Row k="jamendo" name="Jamendo" desc="Музыка по лицензии Creative Commons" link="https://devportal.jamendo.com/" />
-        {src.jamendo && <input className="input" style={{ height: 38, marginBottom: 8 }} placeholder="Jamendo Client ID" value={src.jamendoId} onChange={(e) => up({ jamendoId: e.target.value.trim() })} />}
-        <Row k="soundcloud" name="SoundCloud" desc="Официальный API — нужны ключи своего приложения" link="https://soundcloud.com/you/apps" />
-        {src.soundcloud && (
-          <div className="col" style={{ gap: 6, marginBottom: 8 }}>
-            <input className="input" style={{ height: 38 }} placeholder="SoundCloud Client ID" value={src.scId} onChange={(e) => up({ scId: e.target.value.trim() })} />
-            <input className="input" style={{ height: 38 }} type="password" placeholder="SoundCloud Client Secret" value={src.scSecret} onChange={(e) => up({ scSecret: e.target.value.trim() })} />
-          </div>
-        )}
         <Row k="preview" name="Превью Deezer" desc="30 секунд, если полной версии нигде нет" />
       </div>
     </div>

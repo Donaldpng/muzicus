@@ -30,8 +30,6 @@ export function trackUrl(t: Track, downloaded: boolean): string | null {
 export const PROVIDERS: Record<string, string> = {
   audius: "Audius",
   archive: "Internet Archive",
-  jamendo: "Jamendo",
-  soundcloud: "SoundCloud",
   preview: "Превью 30 с",
 };
 
@@ -41,8 +39,6 @@ export const api = {
   setSources: (cfg: SourceConfig) => invoke<void>("set_sources", { cfg }),
   search: (query: string) => invoke<Track[]>("search", { query }),
   openSearch: (query: string) => invoke<Track[]>("open_search", { query }),
-  scSearch: (query: string) => invoke<Track[]>("sc_search", { query }),
-  scOembed: (url: string) => invoke<Track>("sc_oembed", { url }),
   chart: () => invoke<Track[]>("chart"),
   suggest: (query: string) => invoke<string[]>("suggest", { query }),
   radio: (t: Track) => invoke<Track[]>("radio", { dz: t.dz ?? null, artist: t.artist || null }),

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { engine } from "../audio/engine";
-import { scwActive, scwLoad, scwSeek, scwStop, scwToggle, scwVolume } from "../audio/scwidget";
 import { api, shuffleArr, trackUrl } from "../lib/api";
 import type { QueueContext, Repeat, Track } from "../lib/types";
 import { useLib } from "./library";
@@ -19,7 +18,7 @@ interface PlayerState {
   buffered: number;
   shuffle: boolean;
   repeat: Repeat;
-  /** where the current audio comes from: local | offline | audius | archive | jamendo | soundcloud | preview */
+  /** where the current audio comes from: local | offline | audius | archive | preview */
   sourceLabel: string | null;
 
   playList: (ids: string[], start?: number, ctx?: QueueContext) => void;
@@ -88,7 +87,6 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   toggle: () => {
     const a = engine.audio;
     if (get().index < 0) return;
-    if (scwActive()) return scwToggle();
     engine.ensureGraph();
     if (!a.src) return load(true);
     if (a.paused) a.play().catch(() => {});
@@ -99,7 +97,6 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const { queue, index, repeat } = get();
     if (!queue.length) return;
     if (auto && repeat === "one") {
-      if (scwActive()) return load(true);
       engine.audio.currentTime = 0;
       engine.audio.play().catch(() => {});
       return;
@@ -133,10 +130,6 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   seek: (t) => {
-    if (scwActive()) {
-      scwSeek(t);
-      return set({ position: t });
-    }
     const a = engine.audio;
     if (isFinite(t)) a.currentTime = Math.max(0, Math.min(t, a.duration || t));
     set({ position: a.currentTime });
@@ -209,16 +202,18 @@ let loadSeq = 0;
 let playingSource: string | null = null;
 const resolving = new Map<string, Promise<Track | null>>();
 
+const PROVIDERS_OK = new Set(["audius", "archive"]);
 const isDownloaded = (t: Track) => !!useLib.getState().downloads[t.id];
 
 /**
  * Make sure a track has something to play: local file, downloaded copy, or a matching
- * full-length file on an open platform (Audius / Archive / Jamendo / SoundCloud).
+ * full-length file on an open platform (Audius / Internet Archive).
  * A 30-second Deezer preview is the last resort and is re-checked on every play.
  */
 export async function ensurePlayable(t: Track, force = false): Promise<Track | null> {
   if (t.local || isDownloaded(t)) return t;
-  if (t.src && t.src.full && !force) return t;
+  // sources removed in later versions (SoundCloud, Jamendo) are re-matched
+  if (t.src && t.src.full && !force && PROVIDERS_OK.has(t.src.provider)) return t;
   let p = resolving.get(t.id);
   if (!p) {
     p = api
@@ -245,29 +240,6 @@ async function load(autoplay: boolean) {
   engine.ensureGraph();
   usePlayer.setState({ loading: true, position: 0, duration: t0.duration ?? 0, buffered: 0 });
   a.pause();
-  // SoundCloud link without API key → official embedded player
-  if (t0.scw && !t0.local && !isDownloaded(t0)) {
-    a.removeAttribute("src");
-    a.load();
-    usePlayer.setState({ sourceLabel: "scwidget" });
-    useLib.getState().pushHistory(t0.id);
-    updateMediaSession(t0);
-    scwVolume(useSettings.getState().volume);
-    scwLoad(t0.scw, {
-      onPlay: () => seq === loadSeq && usePlayer.setState({ playing: true, loading: false }),
-      onPause: () => seq === loadSeq && usePlayer.setState({ playing: false }),
-      onProgress: (p, d) => seq === loadSeq && usePlayer.setState({ position: p, duration: d || usePlayer.getState().duration, buffered: d }),
-      onFinish: () => seq === loadSeq && usePlayer.getState().next(true),
-      onError: () => {
-        if (seq !== loadSeq) return;
-        usePlayer.setState({ loading: false, playing: false });
-        toast("SoundCloud: трек недоступен для встраивания", "err");
-        skipOnError(seq);
-      },
-    });
-    return;
-  }
-  scwStop();
   const t = await ensurePlayable(t0);
   if (seq !== loadSeq) return;
   const url = t && trackUrl(t, isDownloaded(t));
@@ -377,8 +349,3 @@ if ("mediaSession" in navigator) {
     ms.setActionHandler("seekto", (d) => d.seekTime != null && P().seek(d.seekTime));
   } catch {}
 }
-
-// keep the SoundCloud widget volume in sync with the app volume
-useSettings.subscribe((s, p) => {
-  if (s.volume !== p.volume) scwVolume(s.volume);
-});

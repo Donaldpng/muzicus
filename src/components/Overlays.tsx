@@ -99,7 +99,7 @@ export function Toasts() {
   );
 }
 
-const PLATFORMS = ["YouTube", "YT Music", "Spotify", "Deezer", "Яндекс Музыка", "Apple Music", "SoundCloud"];
+const PLATFORMS = ["YouTube", "YT Music", "Spotify", "Deezer", "Яндекс Музыка", "Apple Music"];
 
 export function ImportModal() {
   const open = useUi((s) => s.importOpen);

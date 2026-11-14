@@ -75,12 +75,7 @@ export const defaults: Settings = {
   sources: {
     audius: true,
     archive: true,
-    jamendo: true,
-    soundcloud: true,
     preview: true,
-    jamendoId: "",
-    scId: "",
-    scSecret: "",
   },
 };
 
@@ -108,7 +103,12 @@ export async function loadSettings() {
         ...d,
         eq: { ...defaults.eq, ...d.eq },
         vis: { ...defaults.vis, ...d.vis },
-        sources: { ...defaults.sources, ...d.sources },
+        // keep only current source switches (drops old SoundCloud/Jamendo keys)
+        sources: {
+          audius: d.sources?.audius ?? defaults.sources.audius,
+          archive: d.sources?.archive ?? defaults.sources.archive,
+          preview: d.sources?.preview ?? defaults.sources.preview,
+        },
       });
     }
   } catch {}

@@ -11,10 +11,6 @@ const MAX_PARALLEL = 3;
 /** Download the full-length file from the matched open source to the device. */
 export async function downloadTrack(t: Track, silent = false) {
   if (t.local) return;
-  if (t.scw && !t.src) {
-    if (!silent) toast("Треки из плеера SoundCloud нельзя скачать — только слушать", "err");
-    return;
-  }
   const lib = useLib.getState();
   if (lib.downloads[t.id] || lib.dl[t.id] != null) return;
   useLib.setState((s) => ({ dl: { ...s.dl, [t.id]: 0 } }));

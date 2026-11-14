@@ -8,7 +8,7 @@ import { Cover } from "./Common";
 import { I } from "./Icons";
 
 const ROW_H = 58;
-const SRC_TAG: Record<string, string> = { audius: "AU", archive: "IA", jamendo: "JA", soundcloud: "SC" };
+const SRC_TAG: Record<string, string> = { audius: "AU", archive: "IA" };
 
 interface RowProps {
   t: Track;

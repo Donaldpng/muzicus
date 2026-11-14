@@ -1,7 +1,6 @@
 //! Tiny local HTTP server that feeds the <audio> element.
 //!
-//! * `/p?u=<url>`      – range proxy to an open source (Audius, Archive, Jamendo, Deezer preview,
-//!                       or `sc:<urn>` for SoundCloud via the official API)
+//! * `/p?u=<url>`      – range proxy to an open source (Audius, Internet Archive, Deezer preview)
 //! * `/dl/<trackId>`   – a downloaded track
 //! * `/f/<dir>/<name>` – files from the app data dir (files | covers)
 //!
@@ -153,22 +152,13 @@ async fn serve_file(sock: &mut TcpStream, req: &Req, path: PathBuf) -> std::io::
 }
 
 async fn proxy(sock: &mut TcpStream, req: &Req, st: &AppState, target: &str) -> std::io::Result<()> {
-    let (url, auth) = if let Some(urn) = target.strip_prefix("sc:") {
-        match st.sources.sc_stream(urn).await {
-            Ok((u, a)) => (u, Some(a)),
-            Err(e) => return simple(sock, "502 Bad Gateway", &e).await,
-        }
-    } else if target.starts_with("https://") || target.starts_with("http://") {
-        (target.to_string(), None)
-    } else {
+    if !target.starts_with("https://") && !target.starts_with("http://") {
         return simple(sock, "400 Bad Request", "bad url").await;
-    };
+    }
+    let url = target.to_string();
     let mut rb = st.http.get(&url);
     if let Some(r) = &req.range_raw {
         rb = rb.header("Range", r);
-    }
-    if let Some(a) = auth {
-        rb = rb.header("Authorization", a);
     }
     let resp = match rb.send().await {
         Ok(r) => r,

@@ -110,16 +110,6 @@ async fn radio(st: St<'_>, dz: Option<u64>, artist: Option<String>) -> Result<Ve
 }
 
 #[tauri::command]
-async fn sc_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
-    st.sources.sc_search(&query).await
-}
-
-#[tauri::command]
-async fn sc_oembed(st: St<'_>, url: String) -> Result<Track, String> {
-    st.sources.sc_oembed(&url).await
-}
-
-#[tauri::command]
 async fn suggest(st: St<'_>, query: String) -> Result<Vec<String>, String> {
     st.yt.suggest(&query).await
 }
@@ -185,23 +175,17 @@ fn ext_from(ctype: &str, url: &str) -> &'static str {
     }
 }
 
-/// Download a track from its resolved source URL (https or `sc:<urn>`).
+/// Download a track from its resolved source URL.
 #[tauri::command]
 async fn download(app: AppHandle, st: St<'_>, id: String, url: String) -> Result<String, String> {
     if let Some(f) = st.downloaded(&id) {
         return Ok(f);
     }
-    let (real, auth) = if let Some(urn) = url.strip_prefix("sc:") {
-        let (u, a) = st.sources.sc_stream(urn).await?;
-        (u, Some(a))
-    } else {
-        (url.clone(), None)
-    };
-    let mut rb = st.http.get(&real);
-    if let Some(a) = auth {
-        rb = rb.header("Authorization", a);
+    if !url.starts_with("https://") {
+        return Err("bad source url".into());
     }
-    let resp = rb.send().await.map_err(|e| e.to_string())?;
+    let real = url.clone();
+    let resp = st.http.get(&real).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
@@ -433,8 +417,6 @@ pub fn run() {
             set_sources,
             search,
             open_search,
-            sc_search,
-            sc_oembed,
             chart,
             radio,
             suggest,

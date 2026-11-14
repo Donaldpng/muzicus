@@ -63,10 +63,8 @@ pub async fn import_url(src: &crate::sources::Sources, url: &str) -> Result<Impo
         yandex(http, u).await
     } else if low.contains("music.apple.com") {
         apple(http, u).await
-    } else if low.contains("soundcloud.com") {
-        soundcloud(src, u).await
     } else {
-        Err("Неизвестная площадка. Поддерживаются YouTube / YT Music, Spotify, Deezer, Яндекс Музыка, Apple Music, SoundCloud — или вставьте список треков текстом.".into())
+        Err("Неизвестная площадка. Поддерживаются YouTube / YT Music, Spotify, Deezer, Яндекс Музыка, Apple Music — или вставьте список треков текстом.".into())
     }
 }
 
@@ -246,26 +244,6 @@ async fn apple(http: &reqwest::Client, url: &str) -> Result<ImportedPlaylist, St
     if tracks.is_empty() {
         return Err("Apple Music: не удалось прочитать треки — используйте импорт текстом".into());
     }
-    Ok(ImportedPlaylist { name, cover, tracks })
-}
-
-// ---------------- SoundCloud (official API — needs your app's Client ID/Secret) ----------------
-async fn soundcloud(src: &crate::sources::Sources, url: &str) -> Result<ImportedPlaylist, String> {
-    let data = src
-        .sc_get(&format!("https://api.soundcloud.com/resolve?url={}", urlencoding::encode(url)))
-        .await?;
-    let to_track = |t: &Value| -> Option<Track> {
-        let title = t["title"].as_str()?;
-        let artist = t["user"]["username"].as_str().unwrap_or("");
-        Some(pending_track(title, artist, None, t["duration"].as_u64().map(|ms| (ms / 1000) as u32), t["artwork_url"].as_str().map(|u| u.replace("-large", "-t500x500")), "soundcloud"))
-    };
-    if data["kind"] == "track" {
-        let t = to_track(&data).ok_or("SoundCloud: трек не найден")?;
-        return Ok(ImportedPlaylist { name: t.title.clone(), cover: t.cover.clone(), tracks: vec![t] });
-    }
-    let name = s(&data["title"]);
-    let cover = data["artwork_url"].as_str().map(|u| u.replace("-large", "-t500x500"));
-    let tracks = data["tracks"].as_array().map(|a| a.iter().filter_map(to_track).collect()).unwrap_or_default();
     Ok(ImportedPlaylist { name, cover, tracks })
 }
 

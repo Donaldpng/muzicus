@@ -362,15 +362,6 @@ input[type="range"].range::-webkit-slider-thumb { -webkit-appearance: none; widt
 .pb-vis { position: absolute; left: 0; right: 0; top: -38px; height: 36px; pointer-events: none; opacity: .55; }
 .rate-tag { font-family: var(--f-mono); font-size: 11px; font-weight: 700; min-width: 42px; height: 26px; border: 1.5px solid var(--line); border-radius: 8px; display: grid; place-items: center; }
 
-/* ---------- SoundCloud official widget ---------- */
-.scw-card { position: fixed; right: 18px; bottom: calc(var(--player-h) + 14px); width: 380px; z-index: 35; overflow: hidden; box-shadow: var(--shadow); display: flex; flex-direction: column; transform: translateY(16px); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; }
-.scw-card.on { opacity: 1; transform: none; pointer-events: auto; }
-.scw-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 14px; border-bottom: 1.5px solid var(--soft); }
-.scw-frame { height: 166px; background: #fff; }
-.scw-card.min .scw-frame { height: 20px; }
-.scw-note { font-size: 11px; color: var(--muted); padding: 6px 14px 8px; }
-.np ~ .scw-card, .np + .scw-card { z-index: 45; }
-
 /* ---------- popover ---------- */
 .pop {
   position: absolute; bottom: calc(100% + 12px); right: 0;

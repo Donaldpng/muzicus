@@ -13,13 +13,11 @@ export interface Track {
   dz?: number;
   /** resolved playable source */
   src?: Source;
-  /** SoundCloud page URL played through the official embedded widget */
-  scw?: string;
   source: string;
 }
 
 export interface Source {
-  provider: "audius" | "archive" | "jamendo" | "soundcloud" | "preview" | string;
+  provider: "audius" | "archive" | "preview" | string;
   id: string;
   url: string;
   title: string;
@@ -32,12 +30,7 @@ export interface Source {
 export interface SourceConfig {
   audius: boolean;
   archive: boolean;
-  jamendo: boolean;
-  soundcloud: boolean;
   preview: boolean;
-  jamendoId: string;
-  scId: string;
-  scSecret: string;
 }
 
 export type Repeat = "off" | "all" | "one";

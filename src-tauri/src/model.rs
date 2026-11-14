@@ -25,10 +25,7 @@ pub struct Track {
     /// Resolved playable source
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<Source>,
-    /// SoundCloud page URL played through the official embedded widget (no API key)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scw: Option<String>,
-    /// Where the track came from: deezer | local | audius | archive | jamendo | soundcloud | spotify | yt | text …
+    /// Where the track came from: deezer | local | audius | archive | spotify | yt | text …
     pub source: String,
 }
 
@@ -36,10 +33,10 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    /// audius | archive | jamendo | soundcloud | preview
+    /// audius | archive | preview
     pub provider: String,
     pub id: String,
-    /// https URL, or `sc:<urn>` for SoundCloud (resolved with auth at play time)
+    /// https URL of the audio file
     pub url: String,
     pub title: String,
     pub artist: String,
