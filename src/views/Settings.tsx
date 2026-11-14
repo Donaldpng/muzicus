@@ -20,6 +20,46 @@ const MODES: { id: VisMode; name: string }[] = [
   { id: "blocks", name: "LED-блоки" },
 ];
 
+function SourcesCard() {
+  const src = useSettings((s) => s.sources);
+  const set = useSettings((s) => s.set);
+  const up = (p: Partial<typeof src>) => set({ sources: { ...src, ...p } });
+  const Row = ({ k, name, desc, link }: { k: "audius" | "archive" | "jamendo" | "soundcloud" | "preview"; name: string; desc: string; link?: string }) => (
+    <div className="set-row">
+      <div>
+        <div style={{ fontWeight: 600 }}>{name}</div>
+        <div className="muted" style={{ fontSize: 12 }}>
+          {desc}
+          {link && <> · <a href="#" style={{ color: "var(--accent)" }} onClick={(e) => { e.preventDefault(); openUrl(link); }}>получить ключ</a></>}
+        </div>
+      </div>
+      <Switch on={src[k]} onChange={(v) => up({ [k]: v })} />
+    </div>
+  );
+  return (
+    <div className="card shadow">
+      <div className="card-head"><span className="label" style={{ color: "var(--ink)" }}>Источники музыки</span><div className="dots"><i /><i /><i /></div></div>
+      <div style={{ padding: "6px 18px 14px" }}>
+        <div className="muted" style={{ fontSize: 12, padding: "10px 0 4px" }}>
+          Каталог и поиск — Deezer. Полные версии треков ищутся на открытых площадках ниже, в порядке лучшего совпадения.
+        </div>
+        <Row k="audius" name="Audius" desc="Открытая платформа артистов, ключ не нужен" />
+        <Row k="archive" name="Internet Archive" desc="Общественное достояние, архивы, концерты" />
+        <Row k="jamendo" name="Jamendo" desc="Музыка по лицензии Creative Commons" link="https://devportal.jamendo.com/" />
+        {src.jamendo && <input className="input" style={{ height: 38, marginBottom: 8 }} placeholder="Jamendo Client ID" value={src.jamendoId} onChange={(e) => up({ jamendoId: e.target.value.trim() })} />}
+        <Row k="soundcloud" name="SoundCloud" desc="Официальный API — нужны ключи своего приложения" link="https://soundcloud.com/you/apps" />
+        {src.soundcloud && (
+          <div className="col" style={{ gap: 6, marginBottom: 8 }}>
+            <input className="input" style={{ height: 38 }} placeholder="SoundCloud Client ID" value={src.scId} onChange={(e) => up({ scId: e.target.value.trim() })} />
+            <input className="input" style={{ height: 38 }} type="password" placeholder="SoundCloud Client Secret" value={src.scSecret} onChange={(e) => up({ scSecret: e.target.value.trim() })} />
+          </div>
+        )}
+        <Row k="preview" name="Превью Deezer" desc="30 секунд, если полной версии нигде нет" />
+      </div>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const s = useSettings();
   const vis = s.vis;
@@ -59,6 +99,8 @@ export function SettingsView() {
             </div>
           </div>
         </div>
+
+        <SourcesCard />
 
         <div className="card shadow">
           <div className="card-head"><span className="label" style={{ color: "var(--ink)" }}>Визуализатор</span><div className="dots"><i /><i /><i /></div></div>

@@ -14,7 +14,7 @@ g = g.replace(/manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"false"/g, '
 
 const b64 = process.env.ANDROID_KEYSTORE_B64;
 if (b64) {
-  const ks = path.resolve(root, "app/release.jks");
+  const ks = path.resolve(root, "app/release.p12");
   fs.writeFileSync(ks, Buffer.from(b64, "base64"));
   fs.writeFileSync(
     path.join(root, "keystore.properties"),
@@ -37,6 +37,7 @@ if (b64) {
             keyPassword = keystoreProperties["password"] as String
             storeFile = file(keystoreProperties["storeFile"] as String)
             storePassword = keystoreProperties["password"] as String
+            storeType = "pkcs12"
         }
     }$1`,
   );

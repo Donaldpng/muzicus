@@ -19,7 +19,7 @@ function MenuInner() {
   const { ref, pos } = useFit(menu.x, menu.y);
   const playlists = useLib((s) => s.playlists);
   const liked = useLib((s) => s.liked.includes(menu.track.id));
-  const downloaded = useLib((s) => !!(menu.track.yt && s.downloads[menu.track.yt]));
+  const downloaded = useLib((s) => !!s.downloads[menu.track.id]);
   const [sub, setSub] = useState(false);
   const t = menu.track;
   const P = usePlayer.getState();
@@ -64,10 +64,10 @@ function MenuInner() {
             <button onClick={act(() => { L.upsert([t]); downloadTrack(t); })}><I.download size={16} /> Скачать</button>
           )
         )}
-        {t.yt && (
+        {(t.dz || t.artist) && !t.local && (
           <button onClick={act(async () => {
             try {
-              const list = await api.radio(t.yt!);
+              const list = await api.radio(t);
               usePlayer.getState().playTrack(t, [t, ...list], { type: "radio" });
             } catch (e) { toast("Не удалось: " + e, "err"); }
           })}><I.radio size={16} /> Похожие треки</button>

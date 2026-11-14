@@ -26,6 +26,8 @@ function Clock() {
   );
 }
 
+let chartCache: Track[] | null = null;
+
 const MOODS = ["Lo-fi для работы", "Synthwave", "Русский рэп новинки", "Джаз вечер", "Phonk", "Классика для концентрации", "Инди рок", "K-pop"];
 
 export function Home() {
@@ -40,12 +42,18 @@ export function Home() {
   const dayOfYear = Math.floor((+now - +new Date(now.getFullYear(), 0, 0)) / 864e5);
   const yearLen = (now.getFullYear() % 4 === 0 ? 366 : 365);
   const [mix, setMix] = useState<Track[] | null>(null);
+  const [chart, setChart] = useState<Track[] | null>(chartCache);
 
   useEffect(() => {
-    const seed = recent.find((t) => t.yt)?.yt;
+    const seed = recent.find((t) => t.dz || t.artist);
     if (!seed) return;
-    api.radio(seed).then((l) => setMix(l.slice(0, 16))).catch(() => {});
+    api.radio(seed).then((l) => setMix(l.slice(0, 20))).catch(() => {});
   }, [history[0]]);
+
+  useEffect(() => {
+    if (chartCache) return;
+    api.chart().then((c) => { chartCache = c; setChart(c); }).catch(() => {});
+  }, []);
 
   return (
     <div className="page">
@@ -114,6 +122,23 @@ export function Home() {
                 <Cover src={t.cover} />
                 <div style={{ minWidth: 0, width: "100%" }}>
                   <div className="t-title ellipsis">{t.title}</div>
+                  <div className="t-sub ellipsis">{t.artist}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {chart && chart.length > 0 && (
+        <div className="section">
+          <div className="section-head"><span className="h2">Чарт</span><button className="btn sm" onClick={() => usePlayer.getState().playTrack(chart[0], chart, { type: "search" })}><I.play size={14} /> Слушать</button></div>
+          <div className="hscroll">
+            {chart.slice(0, 24).map((t, i) => (
+              <button key={t.id} className="mini-card" onClick={() => usePlayer.getState().playTrack(t, chart, { type: "search" })}>
+                <Cover src={t.cover} />
+                <div style={{ minWidth: 0, width: "100%" }}>
+                  <div className="t-title ellipsis"><span className="seg" style={{ fontSize: 11, marginRight: 6, color: "var(--accent)" }}>{String(i + 1).padStart(2, "0")}</span>{t.title}</div>
                   <div className="t-sub ellipsis">{t.artist}</div>
                 </div>
               </button>

@@ -8,6 +8,7 @@ import { Cover } from "./Common";
 import { I } from "./Icons";
 
 const ROW_H = 58;
+const SRC_TAG: Record<string, string> = { audius: "AU", archive: "IA", jamendo: "JA", soundcloud: "SC" };
 
 interface RowProps {
   t: Track;
@@ -22,7 +23,7 @@ interface RowProps {
 }
 
 const Row = memo(function Row({ t, i, current, playing, liked, downloaded, dl, onPlay, onMenu }: RowProps) {
-  const pending = !t.yt && !t.local;
+  const pending = !t.src && !t.local && !downloaded && t.source !== "deezer";
   return (
     <div
       className={`trow ${current ? "current" : ""} ${pending ? "pending" : ""}`}
@@ -52,6 +53,7 @@ const Row = memo(function Row({ t, i, current, playing, liked, downloaded, dl, o
             {downloaded && <I.check size={13} />}
             {dl != null && <span style={{ fontFamily: "var(--f-mono)", fontSize: 10 }}>{Math.round(dl * 100)}%</span>}
             {t.local && <I.file size={13} />}
+            {!t.local && t.src?.full && <span className="src-tag">{SRC_TAG[t.src.provider] ?? "OK"}</span>}
           </span>
         </div>
         <div className="t-sub ellipsis">{t.artist || "—"}</div>
@@ -157,8 +159,8 @@ export function TrackList({
             current={t.id === curId}
             playing={playing}
             liked={likedSet.has(t.id)}
-            downloaded={!!(t.yt && downloads[t.yt])}
-            dl={t.yt ? dl[t.yt] : undefined}
+            downloaded={!!downloads[t.id]}
+            dl={dl[t.id]}
             onPlay={play}
             onMenu={menu}
           />

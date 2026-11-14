@@ -18,6 +18,8 @@ interface PlayerState {
   buffered: number;
   shuffle: boolean;
   repeat: Repeat;
+  /** where the current audio comes from: local | offline | audius | archive | jamendo | soundcloud | preview */
+  sourceLabel: string | null;
 
   playList: (ids: string[], start?: number, ctx?: QueueContext) => void;
   playTrack: (t: Track, list?: Track[], ctx?: QueueContext) => void;
@@ -45,6 +47,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   buffered: 0,
   shuffle: false,
   repeat: "off",
+  sourceLabel: null,
 
   playList: (ids, start = 0, ctx) => {
     if (!ids.length) return;
@@ -196,19 +199,28 @@ export function useCurrentTrack(): Track | undefined {
 
 // ---------------------------------------------------------------- loading
 let loadSeq = 0;
+let playingSource: string | null = null;
 const resolving = new Map<string, Promise<Track | null>>();
 
-/** Make sure a track has a playable source (match imported tracks on YouTube Music). */
-export async function ensurePlayable(t: Track): Promise<Track | null> {
-  if (t.local || t.yt) return t;
+const isDownloaded = (t: Track) => !!useLib.getState().downloads[t.id];
+
+/**
+ * Make sure a track has something to play: local file, downloaded copy, or a matching
+ * full-length file on an open platform (Audius / Archive / Jamendo / SoundCloud).
+ * A 30-second Deezer preview is the last resort and is re-checked on every play.
+ */
+export async function ensurePlayable(t: Track, force = false): Promise<Track | null> {
+  if (t.local || isDownloaded(t)) return t;
+  if (t.src && t.src.full && !force) return t;
   let p = resolving.get(t.id);
   if (!p) {
     p = api
-      .resolve(t)
-      .then((r) => {
-        if (!r) return null;
-        const patch: Partial<Track> = { yt: r.yt, cover: t.cover || r.cover, duration: t.duration || r.duration };
-        useLib.getState().patchTrack(t.id, patch);
+      .resolveSource(t)
+      .then((src) => {
+        if (!src) return null;
+        const patch: Partial<Track> = { src };
+        // previews expire — don't persist them
+        if (src.full) useLib.getState().patchTrack(t.id, patch);
         return { ...t, ...patch };
       })
       .catch(() => null)
@@ -228,13 +240,16 @@ async function load(autoplay: boolean) {
   a.pause();
   const t = await ensurePlayable(t0);
   if (seq !== loadSeq) return;
-  const url = t && trackUrl(t);
+  const url = t && trackUrl(t, isDownloaded(t));
   if (!url) {
     usePlayer.setState({ loading: false });
-    toast(`Не найдено: ${t0.artist} — ${t0.title}`, "err");
+    toast(`Нет в открытых источниках: ${t0.artist} — ${t0.title}`, "err");
     skipOnError(seq);
     return;
   }
+  playingSource = t!.local ? "local" : isDownloaded(t!) ? "offline" : t!.src?.provider ?? null;
+  usePlayer.setState({ sourceLabel: playingSource });
+  if (t!.src && !t!.src.full && !t!.local && !isDownloaded(t!)) toast("Полная версия не найдена — играет 30-секундное превью");
   a.src = url;
   a.playbackRate = useSettings.getState().rate;
   useLib.getState().pushHistory(t0.id);
@@ -261,18 +276,14 @@ function prefetchNext() {
   if (!id) return;
   const t = useLib.getState().tracks[id];
   if (!t) return;
-  setTimeout(async () => {
-    const r = await ensurePlayable(t);
-    if (r?.yt && !r.local) api.prefetch(r.yt).catch(() => {});
-  }, 2500);
+  setTimeout(() => void ensurePlayable(t), 1500);
 }
 
 async function autoRadio() {
   const t = currentTrack();
-  const seed = t?.yt;
-  if (!seed) return;
+  if (!t || (!t.dz && !t.artist)) return;
   try {
-    const list = await api.radio(seed);
+    const list = await api.radio(t);
     if (!list.length) return;
     useLib.getState().upsert(list);
     const { queue, original } = usePlayer.getState();

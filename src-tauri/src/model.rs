@@ -19,8 +19,33 @@ pub struct Track {
     /// Local file name inside app data `files/`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local: Option<String>,
-    /// Where the track came from: yt | local | spotify | deezer | yandex | apple | soundcloud | text
+    /// Deezer catalog id
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dz: Option<u64>,
+    /// Resolved playable source
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src: Option<Source>,
+    /// Where the track came from: deezer | local | audius | archive | jamendo | soundcloud | spotify | yt | text …
     pub source: String,
+}
+
+/// A concrete audio file on an open platform.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    /// audius | archive | jamendo | soundcloud | preview
+    pub provider: String,
+    pub id: String,
+    /// https URL, or `sc:<urn>` for SoundCloud (resolved with auth at play time)
+    pub url: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    /// false = 30-second preview only
+    pub full: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -56,8 +81,7 @@ pub fn pending_track(
         album,
         duration,
         cover,
-        yt: None,
-        local: None,
         source: source.to_string(),
+        ..Default::default()
     }
 }

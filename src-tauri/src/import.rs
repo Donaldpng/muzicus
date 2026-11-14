@@ -51,7 +51,8 @@ fn script_json(html: &str, id: &str) -> Option<Value> {
     serde_json::from_str(raw).ok()
 }
 
-pub async fn import_url(http: &reqwest::Client, url: &str) -> Result<ImportedPlaylist, String> {
+pub async fn import_url(src: &crate::sources::Sources, url: &str) -> Result<ImportedPlaylist, String> {
+    let http = &src.http;
     let u = url.trim();
     let low = u.to_lowercase();
     if low.contains("spotify.com") || low.starts_with("spotify:") {
@@ -63,7 +64,7 @@ pub async fn import_url(http: &reqwest::Client, url: &str) -> Result<ImportedPla
     } else if low.contains("music.apple.com") {
         apple(http, u).await
     } else if low.contains("soundcloud.com") {
-        soundcloud(http, u).await
+        soundcloud(src, u).await
     } else {
         Err("Неизвестная площадка. Поддерживаются YouTube / YT Music, Spotify, Deezer, Яндекс Музыка, Apple Music, SoundCloud — или вставьте список треков текстом.".into())
     }
@@ -248,26 +249,14 @@ async fn apple(http: &reqwest::Client, url: &str) -> Result<ImportedPlaylist, St
     Ok(ImportedPlaylist { name, cover, tracks })
 }
 
-// ---------------- SoundCloud (public api-v2 with scraped client_id) ----------------
-async fn soundcloud(http: &reqwest::Client, url: &str) -> Result<ImportedPlaylist, String> {
-    let home = get_text(http, "https://soundcloud.com/discover").await?;
-    static SCRIPT: Lazy<Regex> = Lazy::new(|| Regex::new(r#"<script crossorigin src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)""#).unwrap());
-    static CID: Lazy<Regex> = Lazy::new(|| Regex::new(r#"client_id[:=]"?([a-zA-Z0-9]{32})"#).unwrap());
-    let mut client_id = None;
-    let scripts: Vec<String> = SCRIPT.captures_iter(&home).map(|c| c[1].to_string()).collect();
-    for sc in scripts.iter().rev() {
-        if let Ok(js) = get_text(http, sc).await {
-            if let Some(c) = CID.captures(&js) {
-                client_id = Some(c[1].to_string());
-                break;
-            }
-        }
-    }
-    let cid = client_id.ok_or("SoundCloud: не удалось получить ключ")?;
-    let data = get_json(http, &format!("https://api-v2.soundcloud.com/resolve?url={}&client_id={cid}", urlencoding::encode(url))).await?;
+// ---------------- SoundCloud (official API — needs your app's Client ID/Secret) ----------------
+async fn soundcloud(src: &crate::sources::Sources, url: &str) -> Result<ImportedPlaylist, String> {
+    let data = src
+        .sc_get(&format!("https://api.soundcloud.com/resolve?url={}", urlencoding::encode(url)))
+        .await?;
     let to_track = |t: &Value| -> Option<Track> {
         let title = t["title"].as_str()?;
-        let artist = t.pointer("/publisher_metadata/artist").and_then(|v| v.as_str()).filter(|a| !a.is_empty()).or(t.pointer("/user/username").and_then(|v| v.as_str())).unwrap_or("");
+        let artist = t["user"]["username"].as_str().unwrap_or("");
         Some(pending_track(title, artist, None, t["duration"].as_u64().map(|ms| (ms / 1000) as u32), t["artwork_url"].as_str().map(|u| u.replace("-large", "-t500x500")), "soundcloud"))
     };
     if data["kind"] == "track" {
@@ -276,25 +265,7 @@ async fn soundcloud(http: &reqwest::Client, url: &str) -> Result<ImportedPlaylis
     }
     let name = s(&data["title"]);
     let cover = data["artwork_url"].as_str().map(|u| u.replace("-large", "-t500x500"));
-    let list = data["tracks"].as_array().cloned().unwrap_or_default();
-    let mut tracks = vec![];
-    let mut missing = vec![];
-    for t in &list {
-        match to_track(t) {
-            Some(tr) => tracks.push(tr),
-            None => {
-                if let Some(id) = t["id"].as_u64() {
-                    missing.push(id)
-                }
-            }
-        }
-    }
-    for chunk in missing.chunks(50) {
-        let ids = chunk.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-        if let Ok(Value::Array(arr)) = get_json(http, &format!("https://api-v2.soundcloud.com/tracks?ids={ids}&client_id={cid}")).await {
-            tracks.extend(arr.iter().filter_map(to_track));
-        }
-    }
+    let tracks = data["tracks"].as_array().map(|a| a.iter().filter_map(to_track).collect()).unwrap_or_default();
     Ok(ImportedPlaylist { name, cover, tracks })
 }
 

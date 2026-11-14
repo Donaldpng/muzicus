@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fmtTime } from "../lib/api";
 import { downloadTrack } from "../lib/actions";
 import { useLib } from "../store/library";
@@ -109,6 +110,36 @@ function SpeedPop() {
   );
 }
 
+const SRC_NAMES: Record<string, string> = {
+  local: "Свой файл",
+  offline: "Офлайн",
+  audius: "Audius",
+  archive: "Internet Archive",
+  jamendo: "Jamendo",
+  soundcloud: "SoundCloud",
+  preview: "Превью 30 с",
+};
+
+function SourcePill() {
+  const label = usePlayer((s) => s.sourceLabel);
+  const t = useCurrentTrack();
+  if (!label) return null;
+  const page = t?.src?.page;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        className={`src-pill ${label === "preview" ? "warn" : ""}`}
+        title={page ? "Открыть страницу источника" : undefined}
+        onClick={() => page && openUrl(page)}
+        style={{ cursor: page ? "pointer" : "default" }}
+      >
+        {SRC_NAMES[label] ?? label}
+        {page && <I.link size={11} />}
+      </button>
+    </div>
+  );
+}
+
 export function PlayerBar() {
   const t = useCurrentTrack();
   const ui = useUi.getState();
@@ -173,8 +204,8 @@ export function NowPlaying() {
   const tab = useUi((s) => s.npTab);
   const t = useCurrentTrack();
   const mode = useSettings((s) => s.vis.mode);
-  const isDl = useLib((s) => !!(t?.yt && s.downloads[t.yt]));
-  const dlp = useLib((s) => (t?.yt ? s.dl[t.yt] : undefined));
+  const isDl = useLib((s) => !!(t && s.downloads[t.id]));
+  const dlp = useLib((s) => (t ? s.dl[t.id] : undefined));
   const close = () => useUi.getState().set({ nowPlaying: false });
   useEffect(() => {
     if (!open) return;
@@ -205,6 +236,7 @@ export function NowPlaying() {
         <div className="np-meta">
           <div className="h2 ellipsis">{t?.title ?? "—"}</div>
           <div className="muted ellipsis" style={{ marginTop: 4, fontWeight: 600 }}>{t?.artist}</div>
+          <SourcePill />
         </div>
         <div style={{ width: "min(460px, 100%)" }}><Progress /></div>
         <Controls big />

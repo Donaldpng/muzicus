@@ -43,7 +43,7 @@ export function Lyrics({ track }: { track?: Track }) {
     return () => {
       alive = false;
     };
-  }, [track?.id, track?.yt]);
+  }, [track?.id]);
 
   const lines = useMemo(() => (data?.synced ? parseLrc(data.synced) : null), [data]);
 

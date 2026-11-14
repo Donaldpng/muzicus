@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ImportedPlaylist, LyricsResult, Track } from "./types";
+import type { ImportedPlaylist, LyricsResult, Source, SourceConfig, Track } from "./types";
 
 let port = 0;
 let plat: "windows" | "android" | "other" = "other";
@@ -19,31 +19,38 @@ export function img(src?: string) {
   return src;
 }
 
-export function trackUrl(t: Track): string | null {
+/** Playable URL: local file → downloaded copy → resolved open source (proxied). */
+export function trackUrl(t: Track, downloaded: boolean): string | null {
   if (t.local) return `${base()}/f/files/${encodeURIComponent(t.local)}`;
-  if (t.yt) return `${base()}/yt/${t.yt}`;
+  if (downloaded) return `${base()}/dl/${encodeURIComponent(t.id)}`;
+  if (t.src?.url) return `${base()}/p?u=${encodeURIComponent(t.src.url)}`;
   return null;
 }
+
+export const PROVIDERS: Record<string, string> = {
+  audius: "Audius",
+  archive: "Internet Archive",
+  jamendo: "Jamendo",
+  soundcloud: "SoundCloud",
+  preview: "Превью 30 с",
+};
 
 export const api = {
   loadState: (name: string) => invoke<string | null>("load_state", { name }),
   saveState: (name: string, data: string) => invoke<void>("save_state", { name, data }),
-  search: (query: string, videos = false) => invoke<Track[]>("search", { query, videos }),
+  setSources: (cfg: SourceConfig) => invoke<void>("set_sources", { cfg }),
+  search: (query: string) => invoke<Track[]>("search", { query }),
+  openSearch: (query: string) => invoke<Track[]>("open_search", { query }),
+  chart: () => invoke<Track[]>("chart"),
   suggest: (query: string) => invoke<string[]>("suggest", { query }),
-  radio: (id: string) => invoke<Track[]>("radio", { id }),
-  resolve: (t: Track) =>
-    invoke<Track | null>("resolve_track", { title: t.title, artist: t.artist, duration: t.duration ?? null }),
-  prefetch: (id: string) => invoke<void>("prefetch", { id }),
+  radio: (t: Track) => invoke<Track[]>("radio", { dz: t.dz ?? null, artist: t.artist || null }),
+  resolveSource: (t: Track) =>
+    invoke<Source | null>("resolve_source", { title: t.title, artist: t.artist, duration: t.duration ?? null, dz: t.dz ?? null }),
   importPlaylist: (url: string) => invoke<ImportedPlaylist>("import_playlist", { url }),
   importText: (text: string) => invoke<Track[]>("import_text", { text }),
   lyrics: (t: Track) =>
-    invoke<LyricsResult | null>("lyrics", {
-      title: t.title,
-      artist: t.artist,
-      duration: t.duration ?? null,
-      yt: t.yt ?? null,
-    }),
-  download: (id: string) => invoke<string>("download", { id }),
+    invoke<LyricsResult | null>("lyrics", { title: t.title, artist: t.artist, duration: t.duration ?? null }),
+  download: (id: string, url: string) => invoke<string>("download", { id, url }),
   deleteDownload: (id: string) => invoke<void>("delete_download", { id }),
   listDownloads: () => invoke<string[]>("list_downloads"),
   downloadsDir: () => invoke<string>("downloads_dir"),

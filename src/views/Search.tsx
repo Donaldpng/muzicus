@@ -11,7 +11,7 @@ const cache = new Map<string, Track[]>();
 export function Search() {
   const initial = useUi((s) => s.searchQuery);
   const [q, setQ] = useState(initial);
-  const [kind, setKind] = useState<"tracks" | "videos">("tracks");
+  const [kind, setKind] = useState<"tracks" | "open">("tracks");
   const [results, setResults] = useState<Track[] | null>(initial ? cache.get("tracks:" + initial) ?? null : null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -36,7 +36,7 @@ export function Search() {
     setBusy(true);
     setErr("");
     try {
-      const r = await api.search(query, k === "videos");
+      const r = k === "open" ? await api.openSearch(query) : await api.search(query);
       cache.set(key, r);
       if (my === seq.current) setResults(r);
     } catch (e) {
@@ -59,7 +59,7 @@ export function Search() {
 
   return (
     <div className="page">
-      <div className="label" style={{ marginBottom: 6 }}>Search / YouTube Music</div>
+      <div className="label" style={{ marginBottom: 6 }}>Search / Deezer + open sources</div>
       <h1 className="h1" style={{ marginBottom: 18 }}>Поиск</h1>
       <div className="search-box">
         <I.search className="lead" size={22} />
@@ -98,18 +98,18 @@ export function Search() {
         </div>
       )}
       <div className="row" style={{ margin: "16px 0 10px" }}>
-        <button className={`chip ${kind === "tracks" ? "on" : ""}`} onClick={() => { setKind("tracks"); run(q, "tracks"); }}>Треки</button>
-        <button className={`chip ${kind === "videos" ? "on" : ""}`} onClick={() => { setKind("videos"); run(q, "videos"); }}>Видео и загрузки</button>
+        <button className={`chip ${kind === "tracks" ? "on" : ""}`} onClick={() => { setKind("tracks"); run(q, "tracks"); }}>Каталог</button>
+        <button className={`chip ${kind === "open" ? "on" : ""}`} onClick={() => { setKind("open"); run(q, "open"); }}>Открытые источники</button>
         <span className="spacer" />
         {busy && <Spinner />}
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-        {kind === "videos" ? "Пользовательские загрузки, ремиксы, лайвы и треки, удалённые со стримингов" : "Официальный каталог YouTube Music"}
+        {kind === "open" ? "Audius, Internet Archive, Jamendo, SoundCloud — бесплатные треки целиком, можно слушать и скачивать" : "Каталог Deezer. Полная версия ищется в открытых источниках при воспроизведении; если её нет — играет 30-секундное превью"}
       </div>
       {err && <div style={{ color: "var(--danger)", fontWeight: 600 }}>{err}</div>}
       {results && results.length > 0 && <TrackList tracks={results} ctx={{ type: "search" }} />}
       {results && results.length === 0 && !busy && (
-        <div className="empty"><Cat size={120} mood="sleep" /><div>Ничего не найдено. Попробуйте вкладку «Видео и загрузки».</div></div>
+        <div className="empty"><Cat size={120} mood="sleep" /><div>Ничего не найдено. Попробуйте другую вкладку.</div></div>
       )}
       {!results && !busy && (
         <div className="empty"><Cat size={130} /><div className="label">Введите запрос</div></div>

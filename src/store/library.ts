@@ -9,8 +9,8 @@ interface LibraryState {
   liked: string[];
   localIds: string[];
   history: string[];
-  downloads: Record<string, true>; // keyed by yt id
-  dl: Record<string, number>; // download progress by yt id
+  downloads: Record<string, true>; // keyed by track id
+  dl: Record<string, number>; // download progress by track id
 
   upsert: (ts: Track[]) => void;
   patchTrack: (id: string, patch: Partial<Track>) => void;
@@ -133,7 +133,7 @@ export async function loadLibrary() {
       playlists.forEach((p) => p.trackIds.forEach((i) => used.add(i)));
       const dls = useLib.getState().downloads;
       const kept: Record<string, Track> = {};
-      for (const [id, t] of Object.entries(tracks)) if (used.has(id) || (t.yt && dls[t.yt])) kept[id] = t;
+      for (const [id, t] of Object.entries(tracks)) if (used.has(id) || dls[id]) kept[id] = t;
       api.saveState("library", JSON.stringify({ tracks: kept, playlists, liked, localIds, history })).catch(console.error);
     }, 600);
   });

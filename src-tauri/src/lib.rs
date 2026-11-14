@@ -1,26 +1,28 @@
 mod import;
 mod model;
 mod server;
+mod sources;
 mod yt;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use futures_util::StreamExt;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncWriteExt;
 
-use model::{stable_id, ImportedPlaylist, Track};
+use model::{stable_id, ImportedPlaylist, Source, Track};
+use sources::{SourceConfig, Sources};
 
 pub struct AppState {
     pub data_dir: PathBuf,
     pub yt: yt::Yt,
     pub http: reqwest::Client,
-    /// Plain client for googlevideo (must not send a browser UA)
-    pub stream_http: reqwest::Client,
+    pub sources: Sources,
     pub port: Mutex<u16>,
-    /// videoId -> file name in downloads/
+    /// track id -> file name in downloads/
     pub downloads: Mutex<HashMap<String, String>>,
 }
 
@@ -34,6 +36,11 @@ type St<'a> = State<'a, Arc<AppState>>;
 
 fn safe_name(name: &str) -> bool {
     !name.is_empty() && !name.contains("..") && !name.contains('/') && !name.contains('\\')
+}
+
+/// track id <-> file stem ("dz:123" <-> "dz~123")
+fn id_to_stem(id: &str) -> String {
+    id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '~' }).collect()
 }
 
 // ------------------------------------------------------------ basics
@@ -58,8 +65,7 @@ async fn load_state(st: St<'_>, name: String) -> Result<Option<String>, String> 
     if !safe_name(&name) {
         return Err("bad name".into());
     }
-    let p = st.data_dir.join(format!("{name}.json"));
-    Ok(tokio::fs::read_to_string(p).await.ok())
+    Ok(tokio::fs::read_to_string(st.data_dir.join(format!("{name}.json"))).await.ok())
 }
 
 #[tauri::command]
@@ -73,10 +79,34 @@ async fn save_state(st: St<'_>, name: String, data: String) -> Result<(), String
     tokio::fs::rename(&tmp, &p).await.map_err(|e| e.to_string())
 }
 
-// ------------------------------------------------------------ YouTube Music
 #[tauri::command]
-async fn search(st: St<'_>, query: String, videos: Option<bool>) -> Result<Vec<Track>, String> {
-    st.yt.search(&query, videos.unwrap_or(false)).await
+fn set_sources(st: St, cfg: SourceConfig) {
+    *st.sources.cfg.lock().unwrap() = cfg;
+}
+
+// ------------------------------------------------------------ catalog & sources
+#[tauri::command]
+async fn search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
+    st.sources.dz_search(&query).await
+}
+
+#[tauri::command]
+async fn open_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
+    Ok(st.sources.open_search(&query).await)
+}
+
+#[tauri::command]
+async fn chart(st: St<'_>) -> Result<Vec<Track>, String> {
+    st.sources.dz_chart().await
+}
+
+#[tauri::command]
+async fn radio(st: St<'_>, dz: Option<u64>, artist: Option<String>) -> Result<Vec<Track>, String> {
+    match (dz, artist) {
+        (Some(id), _) => st.sources.dz_radio(id).await,
+        (None, Some(a)) if !a.is_empty() => st.sources.dz_artist_top(a.split(',').next().unwrap_or(&a)).await,
+        _ => Err("нет данных для подборки".into()),
+    }
 }
 
 #[tauri::command]
@@ -84,28 +114,16 @@ async fn suggest(st: St<'_>, query: String) -> Result<Vec<String>, String> {
     st.yt.suggest(&query).await
 }
 
+/// Find a playable file for a catalog/imported track on open platforms.
 #[tauri::command]
-async fn radio(st: St<'_>, id: String) -> Result<Vec<Track>, String> {
-    st.yt.radio(&id).await
-}
-
-#[tauri::command]
-async fn resolve_track(
+async fn resolve_source(
     st: St<'_>,
     title: String,
     artist: String,
     duration: Option<u32>,
-) -> Result<Option<Track>, String> {
-    st.yt.resolve(&title, &artist, duration).await
-}
-
-/// Warm the stream-URL cache so playback starts instantly.
-#[tauri::command]
-async fn prefetch(st: St<'_>, id: String) -> Result<(), String> {
-    if st.downloaded(&id).is_none() {
-        st.yt.stream(&id, false).await?;
-    }
-    Ok(())
+    dz: Option<u64>,
+) -> Result<Option<Source>, String> {
+    Ok(st.sources.resolve(&title, &artist, duration, dz).await)
 }
 
 #[tauri::command]
@@ -114,7 +132,7 @@ async fn import_playlist(st: St<'_>, url: String) -> Result<ImportedPlaylist, St
     if low.contains("youtube.com") || low.contains("youtu.be") {
         st.yt.import(&url).await
     } else {
-        import::import_url(&st.http, &url).await
+        import::import_url(&st.sources, &url).await
     }
 }
 
@@ -124,26 +142,8 @@ fn import_text(text: String) -> Vec<Track> {
 }
 
 #[tauri::command]
-async fn lyrics(
-    st: St<'_>,
-    title: String,
-    artist: String,
-    duration: Option<u32>,
-    yt: Option<String>,
-) -> Result<Option<import::LyricsResult>, String> {
-    if let Some(r) = import::lrclib(&st.http, &title, &artist, duration).await {
-        return Ok(Some(r));
-    }
-    if let Some(id) = yt {
-        if let Some(body) = st.yt.lyrics(&id).await {
-            return Ok(Some(import::LyricsResult {
-                synced: None,
-                plain: Some(body),
-                source: "YouTube Music".into(),
-            }));
-        }
-    }
-    Ok(None)
+async fn lyrics(st: St<'_>, title: String, artist: String, duration: Option<u32>) -> Result<Option<import::LyricsResult>, String> {
+    Ok(import::lrclib(&st.http, &title, &artist, duration).await)
 }
 
 // ------------------------------------------------------------ downloads
@@ -153,46 +153,75 @@ struct DlProgress {
     progress: f32,
 }
 
+fn ext_from(ctype: &str, url: &str) -> &'static str {
+    let c = ctype.to_lowercase();
+    if c.contains("mpeg") || c.contains("mp3") {
+        "mp3"
+    } else if c.contains("ogg") {
+        "ogg"
+    } else if c.contains("flac") {
+        "flac"
+    } else if c.contains("mp4") || c.contains("aac") || c.contains("m4a") {
+        "m4a"
+    } else if c.contains("wav") {
+        "wav"
+    } else {
+        match url.split('?').next().unwrap_or("").rsplit('.').next().unwrap_or("") {
+            "ogg" => "ogg",
+            "flac" => "flac",
+            "m4a" => "m4a",
+            _ => "mp3",
+        }
+    }
+}
+
+/// Download a track from its resolved source URL (https or `sc:<urn>`).
 #[tauri::command]
-async fn download(app: AppHandle, st: St<'_>, id: String) -> Result<String, String> {
+async fn download(app: AppHandle, st: St<'_>, id: String, url: String) -> Result<String, String> {
     if let Some(f) = st.downloaded(&id) {
         return Ok(f);
     }
-    let info = st.yt.stream(&id, false).await?;
+    let (real, auth) = if let Some(urn) = url.strip_prefix("sc:") {
+        let (u, a) = st.sources.sc_stream(urn).await?;
+        (u, Some(a))
+    } else {
+        (url.clone(), None)
+    };
+    let mut rb = st.http.get(&real);
+    if let Some(a) = auth {
+        rb = rb.header("Authorization", a);
+    }
+    let resp = rb.send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    let ctype = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let file = format!("{}.{}", id_to_stem(&id), ext_from(&ctype, &real));
     let dir = st.data_dir.join("downloads");
-    let file = format!("{id}.{}", info.ext);
-    let tmp = dir.join(format!("{id}.part"));
+    let tmp = dir.join(format!("{}.part", id_to_stem(&id)));
     let mut out = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
-    let total = info.size.max(1);
-    let mut pos: u64 = 0;
-    const PART: u64 = 8 * 1024 * 1024;
-    let mut url = info.url.clone();
-    let mut retried = false;
-    while pos < total {
-        let end = (pos + PART - 1).min(total - 1);
-        let resp = st
-            .stream_http
-            .get(&url)
-            .header("Range", format!("bytes={pos}-{end}"))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            if !retried {
-                retried = true;
-                url = st.yt.stream(&id, true).await?.url;
-                continue;
+    let mut got: u64 = 0;
+    let mut last = 0.0f32;
+    let mut body = resp.bytes_stream();
+    while let Some(chunk) = body.next().await {
+        let b = match chunk {
+            Ok(b) => b,
+            Err(e) => {
+                drop(out);
+                let _ = tokio::fs::remove_file(&tmp).await;
+                return Err(e.to_string());
             }
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return Err(format!("HTTP {}", resp.status()));
+        };
+        out.write_all(&b).await.map_err(|e| e.to_string())?;
+        got += b.len() as u64;
+        if total > 0 {
+            let p = got as f32 / total as f32;
+            if p - last > 0.02 {
+                last = p;
+                let _ = app.emit("dl-progress", DlProgress { id: id.clone(), progress: p });
+            }
         }
-        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-        out.write_all(&bytes).await.map_err(|e| e.to_string())?;
-        pos += bytes.len() as u64;
-        if bytes.is_empty() {
-            break;
-        }
-        let _ = app.emit("dl-progress", DlProgress { id: id.clone(), progress: pos as f32 / total as f32 });
     }
     out.flush().await.map_err(|e| e.to_string())?;
     drop(out);
@@ -259,10 +288,8 @@ async fn save_user_file(st: St<'_>, request: tauri::ipc::Request<'_>) -> Result<
     let mut album = None;
     let mut duration = None;
     let mut cover = None;
-    let covers_dir = st.data_dir.join("covers");
     let p2 = path.clone();
-    let meta = tokio::task::spawn_blocking(move || read_tags(&p2)).await.ok().flatten();
-    if let Some(m) = meta {
+    if let Some(m) = tokio::task::spawn_blocking(move || read_tags(&p2)).await.ok().flatten() {
         if let Some(t) = m.title.filter(|s| !s.is_empty()) {
             title = t;
         }
@@ -273,22 +300,12 @@ async fn save_user_file(st: St<'_>, request: tauri::ipc::Request<'_>) -> Result<
         duration = m.duration;
         if let Some((bytes, ext)) = m.picture {
             let cname = format!("{}.{ext}", id.trim_start_matches("local:"));
-            if tokio::fs::write(covers_dir.join(&cname), bytes).await.is_ok() {
+            if tokio::fs::write(st.data_dir.join("covers").join(&cname), bytes).await.is_ok() {
                 cover = Some(format!("f/covers/{cname}"));
             }
         }
     }
-    Ok(Track {
-        id,
-        title,
-        artist,
-        album,
-        duration,
-        cover,
-        yt: None,
-        local: Some(fname),
-        source: "local".into(),
-    })
+    Ok(Track { id, title, artist, album, duration, cover, local: Some(fname), source: "local".into(), ..Default::default() })
 }
 
 struct Tags {
@@ -332,15 +349,12 @@ async fn save_cover(st: St<'_>, request: tauri::ipc::Request<'_>) -> Result<Stri
     let ext = ext_of(&orig);
     let id = stable_id("c", &format!("{orig}{}{:?}", data.len(), std::time::SystemTime::now()));
     let name = format!("{}.{ext}", id.trim_start_matches("c:"));
-    tokio::fs::write(st.data_dir.join("covers").join(&name), data)
-        .await
-        .map_err(|e| e.to_string())?;
+    tokio::fs::write(st.data_dir.join("covers").join(&name), data).await.map_err(|e| e.to_string())?;
     Ok(format!("f/covers/{name}"))
 }
 
 #[tauri::command]
 async fn delete_file(st: St<'_>, rel: String) -> Result<(), String> {
-    // rel like "f/covers/x.jpg" or "files/x.mp3"
     let rel = rel.trim_start_matches("f/");
     let mut parts = rel.splitn(2, '/');
     let (dir, name) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
@@ -374,22 +388,24 @@ pub fn run() {
                         let _ = std::fs::remove_file(e.path());
                         continue;
                     }
-                    if let Some((id, _)) = name.rsplit_once('.') {
-                        downloads.insert(id.to_string(), name.clone());
+                    if let Some((stem, _)) = name.rsplit_once('.') {
+                        // stems encode ids with '~' instead of ':'
+                        downloads.insert(stem.replacen('~', ":", 1), name.clone());
                     }
                 }
             }
             let http = reqwest::Client::builder()
-                .user_agent(import::UA)
+                .user_agent(format!("MUZICUS/{} (+https://github.com)", env!("CARGO_PKG_VERSION")))
                 .gzip(true)
                 .pool_max_idle_per_host(8)
+                .tcp_nodelay(true)
                 .build()
                 .expect("http");
             let state = Arc::new(AppState {
                 yt: yt::Yt::new(data_dir.join("yt")),
+                sources: Sources::new(http.clone()),
                 data_dir,
                 http,
-                stream_http: reqwest::Client::builder().pool_max_idle_per_host(8).tcp_nodelay(true).build().expect("http"),
                 port: Mutex::new(0),
                 downloads: Mutex::new(downloads),
             });
@@ -404,11 +420,13 @@ pub fn run() {
             platform,
             load_state,
             save_state,
+            set_sources,
             search,
-            suggest,
+            open_search,
+            chart,
             radio,
-            resolve_track,
-            prefetch,
+            suggest,
+            resolve_source,
             import_playlist,
             import_text,
             lyrics,

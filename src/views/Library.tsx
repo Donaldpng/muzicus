@@ -89,7 +89,7 @@ export function ListView({ kind, id }: { kind: "playlist" | "liked" | "downloads
     if (kind === "playlist") ids = playlist?.trackIds ?? [];
     else if (kind === "liked") ids = liked;
     else if (kind === "local") ids = localIds;
-    else ids = Object.values(tracksMap).filter((t) => t.yt && downloads[t.yt]).map((t) => t.id);
+    else ids = Object.values(tracksMap).filter((t) => downloads[t.id]).map((t) => t.id);
     return ids.map((i) => tracksMap[i]).filter(Boolean);
   }, [kind, playlist, liked, localIds, downloads, tracksMap]);
 
@@ -163,7 +163,7 @@ export function ListView({ kind, id }: { kind: "playlist" | "liked" | "downloads
             <button className={`icon-btn ${plShuffle ? "on" : ""}`} onClick={() => setShuffle(!plShuffle)} title="Перемешивание"><I.shuffle size={21} /></button>
             <button className={`icon-btn ${plRepeat !== "off" ? "on" : ""}`} onClick={cycleRepeat} title="Повтор">{plRepeat === "one" ? <I.repeat1 size={21} /> : <I.repeat size={21} />}</button>
             {kind !== "local" && kind !== "downloads" && (
-              <button className="icon-btn" title="Скачать всё" onClick={() => downloadMany(tracks.filter((t) => !t.local && !(t.yt && downloads[t.yt])))}><I.download size={20} /></button>
+              <button className="icon-btn" title="Скачать всё" onClick={() => downloadMany(tracks.filter((t) => !t.local && !downloads[t.id]))}><I.download size={20} /></button>
             )}
             {kind === "local" && <button className="btn sm" onClick={() => addFiles()}><I.plus size={14} /> Файлы</button>}
             {playlist && (

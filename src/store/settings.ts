@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "../lib/api";
+import type { SourceConfig } from "../lib/types";
 
 export type VisMode = "bars" | "mirror" | "wave" | "radial" | "grid" | "blocks";
 
@@ -31,6 +32,7 @@ export interface Settings {
   autoplay: boolean;
   eq: EqSettings;
   vis: VisSettings;
+  sources: SourceConfig;
 }
 
 export const EQ_FREQS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -70,6 +72,16 @@ export const defaults: Settings = {
     glow: true,
     lineWidth: 2,
   },
+  sources: {
+    audius: true,
+    archive: true,
+    jamendo: true,
+    soundcloud: true,
+    preview: true,
+    jamendoId: "",
+    scId: "",
+    scSecret: "",
+  },
 };
 
 export const useSettings = create<Settings & { set: (p: Partial<Settings>) => void }>((set) => ({
@@ -96,13 +108,16 @@ export async function loadSettings() {
         ...d,
         eq: { ...defaults.eq, ...d.eq },
         vis: { ...defaults.vis, ...d.vis },
+        sources: { ...defaults.sources, ...d.sources },
       });
     }
   } catch {}
   applyTheme(useSettings.getState());
+  api.setSources(useSettings.getState().sources).catch(() => {});
   let t: number | undefined;
   useSettings.subscribe((s, prev) => {
     if (s.theme !== prev.theme || s.accent !== prev.accent) applyTheme(s);
+    if (s.sources !== prev.sources) api.setSources(s.sources).catch(() => {});
     clearTimeout(t);
     t = window.setTimeout(() => {
       const { set: _s, ...data } = useSettings.getState();
