@@ -116,13 +116,14 @@ const SRC_NAMES: Record<string, string> = {
   audius: "Audius",
   archive: "Internet Archive",
   preview: "Превью 30 с",
+  "yt-dlp": "Интернет",
 };
 
 function SourcePill() {
   const label = usePlayer((s) => s.sourceLabel);
   const t = useCurrentTrack();
   if (!label) return null;
-  const page = t?.src?.page;
+  const page = t?.src?.page ?? t?.ytUrl;
   return (
     <div style={{ marginTop: 10 }}>
       <button

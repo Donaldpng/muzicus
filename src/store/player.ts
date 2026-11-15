@@ -211,7 +211,7 @@ const isDownloaded = (t: Track) => !!useLib.getState().downloads[t.id];
  * A 30-second Deezer preview is the last resort and is re-checked on every play.
  */
 export async function ensurePlayable(t: Track, force = false): Promise<Track | null> {
-  if (t.local || isDownloaded(t)) return t;
+  if (t.local || t.ytUrl || isDownloaded(t)) return t;
   // sources removed in later versions (SoundCloud, Jamendo) are re-matched
   if (t.src && t.src.full && !force && PROVIDERS_OK.has(t.src.provider)) return t;
   let p = resolving.get(t.id);
@@ -249,7 +249,7 @@ async function load(autoplay: boolean) {
     skipOnError(seq);
     return;
   }
-  playingSource = t!.local ? "local" : isDownloaded(t!) ? "offline" : t!.src?.provider ?? null;
+  playingSource = t!.local ? "local" : isDownloaded(t!) ? "offline" : t!.ytUrl ? "yt-dlp" : t!.src?.provider ?? null;
   usePlayer.setState({ sourceLabel: playingSource });
   if (t!.src && !t!.src.full && !t!.local && !isDownloaded(t!)) toast("Полная версия не найдена — играет 30-секундное превью");
   a.src = url;

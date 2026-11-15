@@ -1,100 +1,284 @@
-//! Tiny local HTTP server that feeds the <audio> element.
-//!
-//! * `/p?u=<url>`      – range proxy to an open source (Audius, Internet Archive, Deezer preview)
-//! * `/dl/<trackId>`   – a downloaded track
-//! * `/f/<dir>/<name>` – files from the app data dir (files | covers)
-//!
-//! Always sends permissive CORS headers so the Web Audio graph (EQ / visualizer) can read samples.
+//! Local Axum server for audio, images, and range-aware CORS media proxying.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures_util::StreamExt;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Response, StatusCode};
+use axum::routing::get;
+use axum::Router;
+use serde::Deserialize;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::AppState;
 
 pub async fn start(state: Arc<AppState>) -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind local server");
-    let port = listener.local_addr().unwrap().port();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind local server");
+    let port = listener.local_addr().expect("local server address").port();
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::HEAD, Method::OPTIONS])
+        .allow_headers(Any)
+        .expose_headers([
+            header::CONTENT_RANGE,
+            header::CONTENT_LENGTH,
+            header::ACCEPT_RANGES,
+        ]);
+    let app = Router::new()
+        .route("/p", get(open_proxy))
+        .route("/yt", get(yt_proxy))
+        .route("/dl/{id}", get(downloaded))
+        .route("/f/{dir}/{name}", get(app_file))
+        .route("/ping", get(ping))
+        .with_state(state)
+        .layer(cors);
+
     tokio::spawn(async move {
-        loop {
-            if let Ok((sock, _)) = listener.accept().await {
-                let st = state.clone();
-                tokio::spawn(async move {
-                    let _ = handle(sock, st).await;
-                });
-            }
+        if let Err(e) = axum::serve(listener, app).await {
+            eprintln!("local HTTP server failed: {e}");
         }
     });
     port
 }
 
-struct Req {
-    method: String,
-    path: String,
-    query: String,
-    range_raw: Option<String>,
-    range: Option<(u64, Option<u64>)>,
+#[derive(Deserialize)]
+struct ProxyQuery {
+    u: String,
 }
 
-impl Req {
-    fn param(&self, key: &str) -> Option<String> {
-        self.query.split('&').find_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            (k == key).then(|| urlencoding::decode(v).map(|s| s.into_owned()).unwrap_or_default())
-        })
-    }
+#[derive(Deserialize)]
+struct YtQuery {
+    url: String,
 }
 
-async fn read_req(sock: &mut TcpStream) -> std::io::Result<Option<Req>> {
-    let mut buf = Vec::with_capacity(2048);
-    let mut tmp = [0u8; 4096];
-    loop {
-        let n = sock.read(&mut tmp).await?;
-        if n == 0 {
-            return Ok(None);
-        }
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.len() > 32 * 1024 {
-            break;
-        }
-    }
-    let text = String::from_utf8_lossy(&buf);
-    let mut lines = text.split("\r\n");
-    let first = lines.next().unwrap_or_default();
-    let mut parts = first.split(' ');
-    let method = parts.next().unwrap_or("GET").to_string();
-    let raw = parts.next().unwrap_or("/");
-    let (raw_path, query) = raw.split_once('?').unwrap_or((raw, ""));
-    let path = urlencoding::decode(raw_path).map(|s| s.into_owned()).unwrap_or_else(|_| raw_path.to_string());
-    let mut range = None;
-    let mut range_raw = None;
-    for l in lines {
-        if let Some((k, v)) = l.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("range") {
-                range_raw = Some(v.trim().to_string());
-                let v = v.trim().trim_start_matches("bytes=");
-                if let Some((s, e)) = v.split_once('-') {
-                    if let Ok(s) = s.parse::<u64>() {
-                        range = Some((s, e.parse::<u64>().ok()));
-                    }
-                }
-            }
-        }
-    }
-    Ok(Some(Req { method, path, query: query.to_string(), range_raw, range }))
-}
-
-const CORS: &str = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n";
-
-async fn simple(sock: &mut TcpStream, code: &str, body: &str) -> std::io::Result<()> {
-    let r = format!(
-        "HTTP/1.1 {code}\r\n{CORS}Content-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+fn text(status: StatusCode, body: impl Into<String>) -> Response<Body> {
+    let mut response = Response::new(Body::from(body.into()));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "text/plain; charset=utf-8".parse().unwrap(),
     );
-    sock.write_all(r.as_bytes()).await
+    response
+}
+
+async fn open_proxy(
+    State(st): State<Arc<AppState>>,
+    Query(query): Query<ProxyQuery>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response<Body> {
+    proxy(&st, &query.u, &method, &headers, &[]).await
+}
+
+async fn yt_proxy(
+    State(st): State<Arc<AppState>>,
+    Query(query): Query<YtQuery>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let stream = match st.yt.stream_info(&query.url).await {
+        Ok(stream) => stream,
+        Err(e) => return text(StatusCode::BAD_GATEWAY, e),
+    };
+    proxy(&st, &stream.url, &method, &headers, &stream.headers).await
+}
+
+async fn proxy(
+    st: &AppState,
+    target: &str,
+    method: &Method,
+    headers: &HeaderMap,
+    upstream_headers: &[(String, String)],
+) -> Response<Body> {
+    if !target.starts_with("https://") && !target.starts_with("http://") {
+        return text(StatusCode::BAD_REQUEST, "bad url");
+    }
+    let mut request = st.http.request(method.clone(), target);
+    for (name, value) in upstream_headers {
+        if name.eq_ignore_ascii_case("range")
+            || name.eq_ignore_ascii_case("host")
+            || name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("connection")
+        {
+            continue;
+        }
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            request = request.header(name, value);
+        }
+    }
+    if let Some(range) = headers.get(header::RANGE) {
+        request = request.header(header::RANGE, range);
+    }
+    let upstream = match request.send().await {
+        Ok(response) => response,
+        Err(e) => return text(StatusCode::BAD_GATEWAY, e.to_string()),
+    };
+    if !upstream.status().is_success() {
+        return text(
+            StatusCode::BAD_GATEWAY,
+            format!("upstream {}", upstream.status()),
+        );
+    }
+
+    let status = upstream.status();
+    let content_type = upstream
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .filter(|value| {
+            let value = value.to_str().unwrap_or_default();
+            !value.starts_with("application/octet") && !value.starts_with("binary")
+        })
+        .cloned()
+        .or_else(|| {
+            target
+                .split('?')
+                .next()
+                .map(mime_for)
+                .and_then(|mime| mime.parse().ok())
+        });
+    let content_length = upstream.headers().get(header::CONTENT_LENGTH).cloned();
+    let content_range = upstream.headers().get(header::CONTENT_RANGE).cloned();
+    let body = if method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from_stream(upstream.bytes_stream())
+    };
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    let response_headers = response.headers_mut();
+    if let Some(value) = content_type {
+        response_headers.insert(header::CONTENT_TYPE, value);
+    }
+    if let Some(value) = content_length {
+        response_headers.insert(header::CONTENT_LENGTH, value);
+    }
+    if let Some(value) = content_range {
+        response_headers.insert(header::CONTENT_RANGE, value);
+    }
+    response_headers.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+    response
+}
+
+async fn downloaded(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response<Body> {
+    match st.downloaded(&id) {
+        Some(file) => serve_file(&method, &headers, st.data_dir.join("downloads").join(file)).await,
+        None => text(StatusCode::NOT_FOUND, "not downloaded"),
+    }
+}
+
+async fn app_file(
+    State(st): State<Arc<AppState>>,
+    Path((dir, name)): Path<(String, String)>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response<Body> {
+    if !matches!(dir.as_str(), "files" | "covers")
+        || name.is_empty()
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+    {
+        return text(StatusCode::BAD_REQUEST, "bad name");
+    }
+    serve_file(&method, &headers, st.data_dir.join(dir).join(name)).await
+}
+
+fn byte_range(headers: &HeaderMap) -> Option<(u64, Option<u64>)> {
+    let value = headers
+        .get(header::RANGE)?
+        .to_str()
+        .ok()?
+        .strip_prefix("bytes=")?;
+    let (start, end) = value.split_once('-')?;
+    Some((start.parse().ok()?, end.parse().ok()))
+}
+
+async fn serve_file(method: &Method, headers: &HeaderMap, path: PathBuf) -> Response<Body> {
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(file) => file,
+        Err(_) => return text(StatusCode::NOT_FOUND, "not found"),
+    };
+    let total = match file.metadata().await {
+        Ok(meta) => meta.len(),
+        Err(e) => return text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let range = byte_range(headers);
+    let (start, end, partial) = match range {
+        Some((start, end)) if start < total && end.unwrap_or(total - 1) >= start => {
+            (start, end.unwrap_or(total - 1).min(total - 1), true)
+        }
+        Some(_) => {
+            let mut response = text(StatusCode::RANGE_NOT_SATISFIABLE, "range not satisfiable");
+            if let Ok(value) = format!("bytes */{total}").parse() {
+                response.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            return response;
+        }
+        None => (0, total.saturating_sub(1), false),
+    };
+    let length = if total == 0 { 0 } else { end - start + 1 };
+    let mime = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(mime_for)
+        .unwrap_or("application/octet-stream");
+    let body = if method == Method::HEAD || length == 0 {
+        Body::empty()
+    } else if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    } else {
+        let reader = file.take(length);
+        let stream = futures_util::stream::try_unfold(reader, |mut reader| async move {
+            let mut chunk = vec![0; 64 * 1024];
+            let read = reader.read(&mut chunk).await?;
+            if read == 0 {
+                Ok::<_, std::io::Error>(None)
+            } else {
+                chunk.truncate(read);
+                Ok::<_, std::io::Error>(Some((chunk, reader)))
+            }
+        });
+        Body::from_stream(stream)
+    };
+
+    let mut response = Response::new(body);
+    *response.status_mut() = if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
+    let response_headers = response.headers_mut();
+    response_headers.insert(header::CONTENT_TYPE, mime.parse().unwrap());
+    response_headers.insert(header::CONTENT_LENGTH, length.to_string().parse().unwrap());
+    response_headers.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+    if partial {
+        if let Ok(value) = format!("bytes {start}-{end}/{total}").parse() {
+            response_headers.insert(header::CONTENT_RANGE, value);
+        }
+    }
+    if mime.starts_with("image/") {
+        response_headers.insert(
+            header::CACHE_CONTROL,
+            "max-age=31536000, immutable".parse().unwrap(),
+        );
+    }
+    response
+}
+
+async fn ping() -> &'static str {
+    "muzicus"
 }
 
 pub fn mime_for(name: &str) -> &'static str {
@@ -111,117 +295,5 @@ pub fn mime_for(name: &str) -> &'static str {
         "webp" => "image/webp",
         "gif" => "image/gif",
         _ => "application/octet-stream",
-    }
-}
-
-async fn serve_file(sock: &mut TcpStream, req: &Req, path: PathBuf) -> std::io::Result<()> {
-    let mut f = match tokio::fs::File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => return simple(sock, "404 Not Found", "not found").await,
-    };
-    let total = f.metadata().await?.len();
-    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let mime = mime_for(name);
-    let (start, end, partial) = match req.range {
-        Some((s, e)) if s < total => (s, e.unwrap_or(total - 1).min(total - 1), true),
-        Some(_) => {
-            let r = format!("HTTP/1.1 416 Range Not Satisfiable\r\n{CORS}Content-Range: bytes */{total}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-            return sock.write_all(r.as_bytes()).await;
-        }
-        None => (0, total.saturating_sub(1), false),
-    };
-    let len = if total == 0 { 0 } else { end - start + 1 };
-    let mut h = format!(
-        "HTTP/1.1 {}\r\n{CORS}Content-Type: {mime}\r\nContent-Length: {len}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n",
-        if partial { "206 Partial Content" } else { "200 OK" }
-    );
-    if partial {
-        h.push_str(&format!("Content-Range: bytes {start}-{end}/{total}\r\n"));
-    }
-    if mime.starts_with("image/") {
-        h.push_str("Cache-Control: max-age=31536000, immutable\r\n");
-    }
-    h.push_str("\r\n");
-    sock.write_all(h.as_bytes()).await?;
-    if req.method == "HEAD" || len == 0 {
-        return Ok(());
-    }
-    f.seek(std::io::SeekFrom::Start(start)).await?;
-    tokio::io::copy(&mut f.take(len), sock).await?;
-    Ok(())
-}
-
-async fn proxy(sock: &mut TcpStream, req: &Req, st: &AppState, target: &str) -> std::io::Result<()> {
-    if !target.starts_with("https://") && !target.starts_with("http://") {
-        return simple(sock, "400 Bad Request", "bad url").await;
-    }
-    let url = target.to_string();
-    let mut rb = st.http.get(&url);
-    if let Some(r) = &req.range_raw {
-        rb = rb.header("Range", r);
-    }
-    let resp = match rb.send().await {
-        Ok(r) => r,
-        Err(e) => return simple(sock, "502 Bad Gateway", &e.to_string()).await,
-    };
-    let status = resp.status();
-    if !status.is_success() {
-        return simple(sock, "502 Bad Gateway", &format!("upstream {status}")).await;
-    }
-    let hv = |k: &str| resp.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
-    let ctype = hv("content-type")
-        .filter(|c| !c.starts_with("application/octet") && !c.starts_with("binary"))
-        .unwrap_or_else(|| mime_for(url.split('?').next().unwrap_or("")).to_string());
-    let mut h = format!(
-        "HTTP/1.1 {} {}\r\n{CORS}Content-Type: {ctype}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n",
-        status.as_u16(),
-        status.canonical_reason().unwrap_or("OK")
-    );
-    if let Some(l) = hv("content-length") {
-        h.push_str(&format!("Content-Length: {l}\r\n"));
-    }
-    if let Some(r) = hv("content-range") {
-        h.push_str(&format!("Content-Range: {r}\r\n"));
-    }
-    h.push_str("\r\n");
-    sock.write_all(h.as_bytes()).await?;
-    if req.method == "HEAD" {
-        return Ok(());
-    }
-    let mut body = resp.bytes_stream();
-    while let Some(chunk) = body.next().await {
-        match chunk {
-            Ok(b) => sock.write_all(&b).await?,
-            Err(_) => break,
-        }
-    }
-    Ok(())
-}
-
-async fn handle(mut sock: TcpStream, st: Arc<AppState>) -> std::io::Result<()> {
-    let _ = sock.set_nodelay(true);
-    let Some(req) = read_req(&mut sock).await? else { return Ok(()) };
-    if req.method == "OPTIONS" {
-        let r = format!("HTTP/1.1 204 No Content\r\n{CORS}Content-Length: 0\r\nConnection: close\r\n\r\n");
-        return sock.write_all(r.as_bytes()).await;
-    }
-    let segs: Vec<&str> = req.path.trim_start_matches('/').split('/').collect();
-    match segs.as_slice() {
-        ["p"] => match req.param("u") {
-            Some(u) => proxy(&mut sock, &req, &st, &u).await,
-            None => simple(&mut sock, "400 Bad Request", "missing u").await,
-        },
-        ["dl", id] => match st.downloaded(id) {
-            Some(file) => serve_file(&mut sock, &req, st.data_dir.join("downloads").join(file)).await,
-            None => simple(&mut sock, "404 Not Found", "not downloaded").await,
-        },
-        ["f", dir, name] if matches!(*dir, "files" | "covers") => {
-            if name.contains("..") || name.contains('\\') {
-                return simple(&mut sock, "400 Bad Request", "bad name").await;
-            }
-            serve_file(&mut sock, &req, st.data_dir.join(dir).join(name)).await
-        }
-        ["ping"] => simple(&mut sock, "200 OK", "muzicus").await,
-        _ => simple(&mut sock, "404 Not Found", "not found").await,
     }
 }

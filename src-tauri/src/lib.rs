@@ -114,6 +114,16 @@ async fn suggest(st: St<'_>, query: String) -> Result<Vec<String>, String> {
     st.yt.suggest(&query).await
 }
 
+#[tauri::command]
+async fn yt_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
+    st.yt.search(&query).await
+}
+
+#[tauri::command]
+async fn yt_resolve(st: St<'_>, url: String) -> Result<Track, String> {
+    st.yt.resolve(&url).await
+}
+
 /// Find a playable file for a catalog/imported track on open platforms.
 #[tauri::command]
 async fn resolve_source(
@@ -475,6 +485,8 @@ pub fn run() {
             chart,
             radio,
             suggest,
+            yt_search,
+            yt_resolve,
             resolve_source,
             import_playlist,
             import_text,

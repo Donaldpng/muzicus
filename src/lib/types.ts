@@ -7,6 +7,8 @@ export interface Track {
   cover?: string;
   /** YouTube video id used as audio source */
   yt?: string;
+  /** Source page URL resolved and streamed by yt-dlp through the local proxy */
+  ytUrl?: string;
   /** file name inside app data /files */
   local?: string;
   /** Deezer catalog id */

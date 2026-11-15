@@ -16,6 +16,9 @@ pub struct Track {
     /// YouTube video id (stream source)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub yt: Option<String>,
+    /// Original page URL for playback through yt-dlp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yt_url: Option<String>,
     /// Local file name inside app data `files/`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local: Option<String>,

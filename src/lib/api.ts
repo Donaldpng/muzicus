@@ -23,6 +23,7 @@ export function img(src?: string) {
 export function trackUrl(t: Track, downloaded: boolean): string | null {
   if (t.local) return `${base()}/f/files/${encodeURIComponent(t.local)}`;
   if (downloaded) return `${base()}/dl/${encodeURIComponent(t.id)}`;
+  if (t.ytUrl) return `${base()}/yt?url=${encodeURIComponent(t.ytUrl)}`;
   if (t.src?.url) return `${base()}/p?u=${encodeURIComponent(t.src.url)}`;
   return null;
 }
@@ -39,6 +40,8 @@ export const api = {
   setSources: (cfg: SourceConfig) => invoke<void>("set_sources", { cfg }),
   search: (query: string) => invoke<Track[]>("search", { query }),
   openSearch: (query: string) => invoke<Track[]>("open_search", { query }),
+  ytSearch: (query: string) => invoke<Track[]>("yt_search", { query }),
+  ytResolve: (url: string) => invoke<Track>("yt_resolve", { url }),
   chart: () => invoke<Track[]>("chart"),
   suggest: (query: string) => invoke<string[]>("suggest", { query }),
   radio: (t: Track) => invoke<Track[]>("radio", { dz: t.dz ?? null, artist: t.artist || null }),

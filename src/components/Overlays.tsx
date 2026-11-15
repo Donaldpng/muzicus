@@ -57,7 +57,7 @@ function MenuInner() {
             ))}
           </>
         )}
-        {!t.local && (
+        {!t.local && !t.ytUrl && (
           downloaded ? (
             <button onClick={act(() => removeDownload(t))}><I.trash size={16} /> Удалить загрузку</button>
           ) : (
