@@ -12,7 +12,7 @@ const cache = new Map<string, Track[]>();
 export function Search() {
   const initial = useUi((s) => s.searchQuery);
   const [q, setQ] = useState(initial);
-  const [kind, setKind] = useState<"tracks" | "open" | "internet">("tracks");
+  const [kind, setKind] = useState<"tracks" | "open">("tracks");
   const [results, setResults] = useState<Track[] | null>(initial ? cache.get("tracks:" + initial) ?? null : null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -38,27 +38,8 @@ export function Search() {
     setBusy(true);
     setErr("");
     try {
-      let r: Track[];
-      if (k === "tracks") {
-        const [deezer, internet] = await Promise.allSettled([api.search(query), api.ytSearch(query)]);
-        if (deezer.status === "rejected" && internet.status === "rejected") {
-          throw new Error(`Deezer: ${String(deezer.reason)}; YouTube: ${String(internet.reason)}`);
-        }
-        r = [
-          ...(deezer.status === "fulfilled" ? deezer.value : []),
-          ...(internet.status === "fulfilled" ? internet.value : []),
-        ];
-        if (my === seq.current && (deezer.status === "rejected" || internet.status === "rejected")) {
-          const provider = deezer.status === "rejected" ? "Deezer" : "YouTube / yt-dlp";
-          const reason = deezer.status === "rejected" ? deezer.reason : internet.status === "rejected" ? internet.reason : "";
-          setErr(`Не удалось выполнить поиск в ${provider}: ${String(reason)}`);
-        } else if (deezer.status === "fulfilled" && internet.status === "fulfilled") {
-          cache.set(key, r);
-        }
-      } else {
-        r = k === "open" ? await api.openSearch(query) : await api.ytSearch(query);
-        cache.set(key, r);
-      }
+      const r = k === "open" ? await api.openSearch(query) : await api.search(query);
+      cache.set(key, r);
       if (my === seq.current) setResults(r);
     } catch (e) {
       if (my === seq.current) setErr(String(e));
@@ -97,7 +78,7 @@ export function Search() {
 
   return (
     <div className="page">
-      <div className="label" style={{ marginBottom: 6 }}>Search / Deezer + YouTube + open sources</div>
+      <div className="label" style={{ marginBottom: 6 }}>Search / YouTube Music + open sources</div>
       <h1 className="h1" style={{ marginBottom: 18 }}>Поиск</h1>
       <div className="search-box">
         <I.search className="lead" size={22} />
@@ -113,7 +94,7 @@ export function Search() {
             if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => Math.min(sugg.length - 1, s + 1)); }
             else if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(-1, s - 1)); }
             else if (e.key === "Enter") {
-              if (isUrl) return kind === "internet" ? void playUrl() : useUi.getState().set({ importOpen: true });
+              if (isUrl) return useUi.getState().set({ importOpen: true });
               const v = sel >= 0 ? sugg[sel] : q;
               setQ(v);
               run(v);
@@ -137,23 +118,20 @@ export function Search() {
         </div>
       )}
       <div className="row wrap" style={{ margin: "16px 0 10px" }}>
-        <button className={`chip ${kind === "tracks" ? "on" : ""}`} onClick={() => { setKind("tracks"); run(q, "tracks"); }}>Каталог</button>
+        <button className={`chip ${kind === "tracks" ? "on" : ""}`} onClick={() => { setKind("tracks"); run(q, "tracks"); }}>YT Music</button>
         <button className={`chip ${kind === "open" ? "on" : ""}`} onClick={() => { setKind("open"); run(q, "open"); }}>Открытые источники</button>
-        <button className={`chip ${kind === "internet" ? "on" : ""}`} onClick={() => { setKind("internet"); run(q, "internet"); }}>YouTube / yt-dlp</button>
         <span className="spacer" />
         {busy && <Spinner />}
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
         {kind === "open"
           ? "Audius и Internet Archive — бесплатные треки целиком, можно слушать и скачивать"
-          : kind === "internet"
-            ? "Поиск по YouTube; для YouTube Music и других сайтов вставьте ссылку на трек. На Windows yt-dlp загрузится автоматически при первом использовании."
-            : "Общий каталог: Deezer и YouTube. Полная версия также ищется в Audius и Internet Archive; если её нет — играет 30-секундное превью"}
+          : "Поиск песен в каталоге YouTube Music. Треки воспроизводятся через yt-dlp; при первой необходимости Windows автоматически скачает yt-dlp."}
       </div>
       {err && <div style={{ color: "var(--danger)", fontWeight: 600 }}>{err}</div>}
       {results && results.length > 0 && <TrackList tracks={results} ctx={{ type: "search" }} />}
       {results && results.length === 0 && !busy && (
-        <div className="empty"><Cat size={120} mood="sleep" /><div>{kind === "internet" ? "Ничего не найдено. Можно также вставить ссылку на поддерживаемый сайт." : "Ничего не найдено. Попробуйте другую вкладку."}</div></div>
+        <div className="empty"><Cat size={120} mood="sleep" /><div>Ничего не найдено. Попробуйте другой запрос.</div></div>
       )}
       {!results && !busy && (
         <div className="empty"><Cat size={130} /><div className="label">Введите запрос</div></div>

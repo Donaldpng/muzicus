@@ -1,5 +1,5 @@
-//! Catalog (Deezer public API) + open audio sources: Audius and Internet Archive.
-//! Deezer's official 30-second previews are the last-resort fallback.
+//! Deezer charts and previews plus open audio sources: Audius and Internet Archive.
+//! YouTube Music is the primary catalog for track search and playback.
 
 use std::time::Duration;
 
@@ -152,11 +152,6 @@ impl Sources {
 
     fn dz_list(v: &Value) -> Vec<Track> {
         v["data"].as_array().map(|a| a.iter().filter_map(Self::dz_track).collect()).unwrap_or_default()
-    }
-
-    pub async fn dz_search(&self, q: &str) -> Result<Vec<Track>, String> {
-        let v = self.json(&format!("https://api.deezer.com/search?q={}&limit=50", urlencoding::encode(q))).await?;
-        Ok(Self::dz_list(&v))
     }
 
     pub async fn dz_chart(&self) -> Result<Vec<Track>, String> {

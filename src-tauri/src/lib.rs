@@ -86,11 +86,6 @@ fn set_sources(st: St, cfg: SourceConfig) {
 
 // ------------------------------------------------------------ catalog & sources
 #[tauri::command]
-async fn search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
-    st.sources.dz_search(&query).await
-}
-
-#[tauri::command]
 async fn open_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
     Ok(st.sources.open_search(&query).await)
 }
@@ -115,7 +110,7 @@ async fn suggest(st: St<'_>, query: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn yt_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
+async fn search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
     st.yt.search(&query).await
 }
 
@@ -485,7 +480,6 @@ pub fn run() {
             chart,
             radio,
             suggest,
-            yt_search,
             yt_resolve,
             resolve_source,
             import_playlist,

@@ -1,6 +1,6 @@
 [package]
 name = "muzicus"
-version = "0.1.7"
+version = "0.1.8"
 description = "MUZICUS — free music player"
 authors = ["muzicus"]
 edition = "2021"

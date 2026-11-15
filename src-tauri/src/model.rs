@@ -28,7 +28,7 @@ pub struct Track {
     /// Resolved playable source
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<Source>,
-    /// Where the track came from: deezer | local | audius | archive | spotify | yt | text …
+    /// Where the track came from: ytmusic | deezer | local | audius | archive | spotify | yt | text …
     pub source: String,
 }
 

@@ -1,4 +1,4 @@
-//! YouTube / YT Music metadata and yt-dlp backed Internet audio playback.
+//! YouTube Music catalog metadata and yt-dlp backed audio playback.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rustypipe::client::RustyPipe;
-use rustypipe::model::{Thumbnail, TrackItem, UrlTarget};
+use rustypipe::model::{Thumbnail, TrackItem, TrackType, UrlTarget};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex as AsyncMutex;
@@ -57,7 +57,8 @@ fn track_from_item(t: &TrackItem) -> Track {
     let artist = t.artists.iter().map(|a| a.name.clone()).collect::<Vec<_>>().join(", ");
     let mut tr = pending_track(&t.name, &artist, t.album.as_ref().map(|a| a.name.clone()), t.duration, best_thumb(&t.cover), "yt");
     tr.yt = Some(t.id.clone());
-    tr.yt_url = Some(format!("https://www.youtube.com/watch?v={}", t.id));
+    tr.yt_url = Some(format!("https://music.youtube.com/watch?v={}", t.id));
+    tr.source = "ytmusic".into();
     tr
 }
 
@@ -190,6 +191,11 @@ impl Yt {
         self.ensure_ytdlp().await?;
         let mut command = Command::new(&self.ytdlp);
         command.args(args).kill_on_drop(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.as_std_mut().creation_flags(0x08000000);
+        }
         let output = tokio::time::timeout(Duration::from_secs(60), command.output())
             .await
             .map_err(|_| "yt-dlp превысил лимит ожидания 60 секунд".to_string())?
@@ -240,6 +246,11 @@ impl Yt {
                 .and_then(|items| items.iter().rev().find_map(|item| item["url"].as_str().map(String::from)))
         });
         let duration = v["duration"].as_f64().map(|d| d.round() as u32);
+        let is_youtube_music = reqwest::Url::parse(&page)
+            .ok()
+            .and_then(|url| url.host_str().map(|host| host == "music.youtube.com"))
+            .unwrap_or(false);
+        let source = if is_youtube_music { "ytmusic" } else { "yt-dlp" };
         Some(Track {
             id: stable_id("yt-dlp", &page),
             title: title.to_string(),
@@ -248,7 +259,7 @@ impl Yt {
             cover,
             yt: (!id.is_empty()).then(|| id.to_string()),
             yt_url: Some(page),
-            source: "yt-dlp".into(),
+            source: source.into(),
             ..Default::default()
         })
     }
@@ -259,22 +270,14 @@ impl Yt {
     }
 
     pub async fn search(&self, query: &str) -> Result<Vec<Track>, String> {
-        let term = format!("ytsearch20:{query}");
-        let output = self
-            .run(&[
-                "--dump-single-json".into(),
-                "--flat-playlist".into(),
-                "--skip-download".into(),
-                "--no-warnings".into(),
-                "--no-progress".into(),
-                term,
-            ])
-            .await?;
-        let data = Self::parse_json(&output)?;
-        Ok(data["entries"]
-            .as_array()
-            .map(|entries| entries.iter().filter_map(Self::track_from_json).collect())
-            .unwrap_or_default())
+        let results = self.rp.query().music_search_tracks(query).await.map_err(|e| e.to_string())?;
+        Ok(results
+            .items
+            .items
+            .into_iter()
+            .filter(|track| track.track_type != TrackType::Episode)
+            .map(|track| track_from_item(&track))
+            .collect())
     }
 
     pub async fn resolve(&self, url: &str) -> Result<Track, String> {
@@ -460,6 +463,18 @@ mod tests {
         .expect("stream metadata");
         assert_eq!(info.url, "https://cdn.example/audio");
         assert_eq!(info.headers, vec![("Referer".into(), "https://example/".into())]);
+    }
+
+    #[test]
+    fn music_youtube_urls_keep_the_music_source_label() {
+        let track = Yt::track_from_json(&serde_json::json!({
+            "id": "music-id",
+            "title": "Song",
+            "webpage_url": "https://music.youtube.com/watch?v=music-id"
+        }))
+        .expect("track metadata");
+        assert_eq!(track.source, "ytmusic");
+        assert_eq!(track.yt_url.as_deref(), Some("https://music.youtube.com/watch?v=music-id"));
     }
 
     #[test]

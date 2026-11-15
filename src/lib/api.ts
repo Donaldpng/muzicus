@@ -19,7 +19,7 @@ export function img(src?: string) {
   return src;
 }
 
-/** Playable URL: local file → downloaded copy → resolved open source (proxied). */
+/** Playable URL: local file → downloaded copy → YouTube Music/open source (proxied). */
 export function trackUrl(t: Track, downloaded: boolean): string | null {
   if (t.local) return `${base()}/f/files/${encodeURIComponent(t.local)}`;
   if (downloaded) return `${base()}/dl/${encodeURIComponent(t.id)}`;
@@ -40,7 +40,6 @@ export const api = {
   setSources: (cfg: SourceConfig) => invoke<void>("set_sources", { cfg }),
   search: (query: string) => invoke<Track[]>("search", { query }),
   openSearch: (query: string) => invoke<Track[]>("open_search", { query }),
-  ytSearch: (query: string) => invoke<Track[]>("yt_search", { query }),
   ytResolve: (url: string) => invoke<Track>("yt_resolve", { url }),
   chart: () => invoke<Track[]>("chart"),
   suggest: (query: string) => invoke<string[]>("suggest", { query }),

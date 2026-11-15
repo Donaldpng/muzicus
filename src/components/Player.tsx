@@ -116,6 +116,7 @@ const SRC_NAMES: Record<string, string> = {
   audius: "Audius",
   archive: "Internet Archive",
   preview: "Превью 30 с",
+  ytmusic: "YouTube Music",
   "yt-dlp": "Интернет",
 };
 

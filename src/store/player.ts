@@ -249,7 +249,15 @@ async function load(autoplay: boolean) {
     skipOnError(seq);
     return;
   }
-  playingSource = t!.local ? "local" : isDownloaded(t!) ? "offline" : t!.ytUrl ? "yt-dlp" : t!.src?.provider ?? null;
+  playingSource = t!.local
+    ? "local"
+    : isDownloaded(t!)
+      ? "offline"
+      : t!.ytUrl
+        ? t!.source === "ytmusic"
+          ? "ytmusic"
+          : "yt-dlp"
+        : t!.src?.provider ?? null;
   usePlayer.setState({ sourceLabel: playingSource });
   if (t!.src && !t!.src.full && !t!.local && !isDownloaded(t!)) toast("Полная версия не найдена — играет 30-секундное превью");
   a.src = url;
