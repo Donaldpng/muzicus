@@ -115,7 +115,6 @@ const SRC_NAMES: Record<string, string> = {
   offline: "Офлайн",
   audius: "Audius",
   archive: "Internet Archive",
-  preview: "Превью 30 с",
   ytmusic: "YouTube Music",
   "yt-dlp": "Интернет",
 };
@@ -128,7 +127,7 @@ function SourcePill() {
   return (
     <div style={{ marginTop: 10 }}>
       <button
-        className={`src-pill ${label === "preview" ? "warn" : ""}`}
+        className="src-pill"
         title={page ? "Открыть страницу источника" : undefined}
         onClick={() => page && openUrl(page)}
         style={{ cursor: page ? "pointer" : "default" }}

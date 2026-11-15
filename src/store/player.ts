@@ -18,7 +18,7 @@ interface PlayerState {
   buffered: number;
   shuffle: boolean;
   repeat: Repeat;
-  /** where the current audio comes from: local | offline | audius | archive | preview */
+  /** where the current audio comes from: local | offline | YouTube Music | open source */
   sourceLabel: string | null;
 
   playList: (ids: string[], start?: number, ctx?: QueueContext) => void;
@@ -208,7 +208,7 @@ const isDownloaded = (t: Track) => !!useLib.getState().downloads[t.id];
 /**
  * Make sure a track has something to play: local file, downloaded copy, or a matching
  * full-length file on an open platform (Audius / Internet Archive).
- * A 30-second Deezer preview is the last resort and is re-checked on every play.
+ * If an imported metadata-only track has no playable source, never fall back to a short preview.
  */
 export async function ensurePlayable(t: Track, force = false): Promise<Track | null> {
   if (t.local || t.ytUrl || isDownloaded(t)) return t;
@@ -221,7 +221,7 @@ export async function ensurePlayable(t: Track, force = false): Promise<Track | n
       .then((src) => {
         if (!src) return null;
         const patch: Partial<Track> = { src };
-        // previews expire — don't persist them
+        // Only persist stable full-length sources.
         if (src.full) useLib.getState().patchTrack(t.id, patch);
         return { ...t, ...patch };
       })
@@ -259,7 +259,6 @@ async function load(autoplay: boolean) {
           : "yt-dlp"
         : t!.src?.provider ?? null;
   usePlayer.setState({ sourceLabel: playingSource });
-  if (t!.src && !t!.src.full && !t!.local && !isDownloaded(t!)) toast("Полная версия не найдена — играет 30-секундное превью");
   a.src = url;
   a.playbackRate = useSettings.getState().rate;
   useLib.getState().pushHistory(t0.id);
@@ -291,7 +290,7 @@ function prefetchNext() {
 
 async function autoRadio() {
   const t = currentTrack();
-  if (!t || (!t.dz && !t.artist)) return;
+  if (!t?.yt) return;
   try {
     const list = await api.radio(t);
     if (!list.length) return;

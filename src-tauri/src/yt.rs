@@ -280,6 +280,31 @@ impl Yt {
             .collect())
     }
 
+    pub async fn chart(&self) -> Result<Vec<Track>, String> {
+        let charts = self.rp.query().music_charts(None).await.map_err(|e| e.to_string())?;
+        let mut seen = std::collections::HashSet::new();
+        Ok(charts
+            .top_tracks
+            .into_iter()
+            .chain(charts.trending_tracks)
+            .filter(|track| track.track_type != TrackType::Episode && seen.insert(track.id.clone()))
+            .map(|track| track_from_item(&track))
+            .collect())
+    }
+
+    pub async fn related(&self, video_id: &str) -> Result<Vec<Track>, String> {
+        let details = self.rp.query().music_details(video_id).await.map_err(|e| e.to_string())?;
+        let related_id = details.related_id.ok_or("YouTube Music не вернул похожие треки")?;
+        let related = self.rp.query().music_related(&related_id).await.map_err(|e| e.to_string())?;
+        let mut seen = std::collections::HashSet::new();
+        Ok(related
+            .tracks
+            .into_iter()
+            .filter(|track| track.track_type != TrackType::Episode && track.id != video_id && seen.insert(track.id.clone()))
+            .map(|track| track_from_item(&track))
+            .collect())
+    }
+
     pub async fn resolve(&self, url: &str) -> Result<Track, String> {
         let parsed = reqwest::Url::parse(url).map_err(|e| format!("Некорректная ссылка: {e}"))?;
         if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {

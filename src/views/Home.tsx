@@ -45,8 +45,11 @@ export function Home() {
   const [chart, setChart] = useState<Track[] | null>(chartCache);
 
   useEffect(() => {
-    const seed = recent.find((t) => t.dz || t.artist);
-    if (!seed) return;
+    const seed = recent.find((t) => t.source === "ytmusic" && t.yt);
+    if (!seed) {
+      setMix(null);
+      return;
+    }
     api.radio(seed).then((l) => setMix(l.slice(0, 20))).catch(() => {});
   }, [history[0]]);
 

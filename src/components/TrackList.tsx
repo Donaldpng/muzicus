@@ -23,7 +23,7 @@ interface RowProps {
 }
 
 const Row = memo(function Row({ t, i, current, playing, liked, downloaded, dl, onPlay, onMenu }: RowProps) {
-  const pending = !t.src && !t.local && !t.ytUrl && !downloaded && t.source !== "deezer";
+  const pending = !t.src && !t.local && !t.ytUrl && !downloaded;
   return (
     <div
       className={`trow ${current ? "current" : ""} ${pending ? "pending" : ""}`}

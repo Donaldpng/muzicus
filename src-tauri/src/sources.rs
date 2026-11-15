@@ -1,5 +1,5 @@
-//! Deezer charts and previews plus open audio sources: Audius and Internet Archive.
-//! YouTube Music is the primary catalog for track search and playback.
+//! Open audio sources: Audius and Internet Archive.
+//! YouTube Music provides the main catalog, charts, and track recommendations.
 
 use std::time::Duration;
 
@@ -19,12 +19,11 @@ pub const APP: &str = "MUZICUS";
 pub struct SourceConfig {
     pub audius: bool,
     pub archive: bool,
-    pub preview: bool,
 }
 
 impl Default for SourceConfig {
     fn default() -> Self {
-        Self { audius: true, archive: true, preview: true }
+        Self { audius: true, archive: true }
     }
 }
 
@@ -134,69 +133,6 @@ impl Sources {
         r.json::<Value>().await.map_err(|e| e.to_string())
     }
 
-    // ============================================================ Deezer catalog
-    fn dz_track(t: &Value) -> Option<Track> {
-        let id = t["id"].as_u64()?;
-        Some(Track {
-            id: format!("dz:{id}"),
-            title: s(&t["title"]),
-            artist: s(&t["artist"]["name"]),
-            album: t["album"]["title"].as_str().map(String::from),
-            duration: t["duration"].as_u64().map(|d| d as u32),
-            cover: t["album"]["cover_big"].as_str().or(t["album"]["cover_medium"].as_str()).map(String::from),
-            dz: Some(id),
-            source: "deezer".into(),
-            ..Default::default()
-        })
-    }
-
-    fn dz_list(v: &Value) -> Vec<Track> {
-        v["data"].as_array().map(|a| a.iter().filter_map(Self::dz_track).collect()).unwrap_or_default()
-    }
-
-    pub async fn dz_chart(&self) -> Result<Vec<Track>, String> {
-        let v = self.json("https://api.deezer.com/chart/0/tracks?limit=40").await?;
-        Ok(Self::dz_list(&v))
-    }
-
-    pub async fn dz_radio(&self, dz: u64) -> Result<Vec<Track>, String> {
-        let t = self.json(&format!("https://api.deezer.com/track/{dz}")).await?;
-        let artist = t["artist"]["id"].as_u64().ok_or("нет исполнителя")?;
-        let v = self.json(&format!("https://api.deezer.com/artist/{artist}/radio?limit=50")).await?;
-        let mut list = Self::dz_list(&v);
-        list.retain(|x| x.dz != Some(dz));
-        Ok(list)
-    }
-
-    pub async fn dz_artist_top(&self, name: &str) -> Result<Vec<Track>, String> {
-        let a = self.json(&format!("https://api.deezer.com/search/artist?q={}&limit=1", urlencoding::encode(name))).await?;
-        let id = a["data"][0]["id"].as_u64().ok_or("исполнитель не найден")?;
-        let v = self.json(&format!("https://api.deezer.com/artist/{id}/top?limit=50")).await?;
-        Ok(Self::dz_list(&v))
-    }
-
-    async fn dz_preview(&self, title: &str, artist: &str, dz: Option<u64>) -> Option<Source> {
-        let t = match dz {
-            Some(id) => self.json(&format!("https://api.deezer.com/track/{id}")).await.ok()?,
-            None => {
-                let q = format!("artist:\"{artist}\" track:\"{title}\"");
-                let v = self.json(&format!("https://api.deezer.com/search?q={}&limit=1", urlencoding::encode(&q))).await.ok()?;
-                v["data"][0].clone()
-            }
-        };
-        let url = t["preview"].as_str().filter(|u| !u.is_empty())?.to_string();
-        Some(Source {
-            provider: "preview".into(),
-            id: t["id"].to_string(),
-            url,
-            title: s(&t["title"]),
-            artist: s(&t["artist"]["name"]),
-            duration: Some(30),
-            full: false,
-            page: t["link"].as_str().map(String::from),
-        })
-    }
-
     // ============================================================ Audius
     async fn audius(&self, q: &str) -> Vec<Source> {
         let url = format!("https://api.audius.co/v1/tracks/search?query={}&app_name={APP}&limit=12", urlencoding::encode(q));
@@ -291,7 +227,7 @@ impl Sources {
     }
 
     // ============================================================ resolve & open search
-    pub async fn resolve(&self, title: &str, artist: &str, duration: Option<u32>, dz: Option<u64>) -> Option<Source> {
+    pub async fn resolve(&self, title: &str, artist: &str, duration: Option<u32>) -> Option<Source> {
         let cfg = self.cfg();
         let q = format!("{artist} {title}");
         let (au, ia) = tokio::join!(
@@ -307,9 +243,6 @@ impl Sources {
             .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         if let Some((_, b)) = best {
             return Some(b);
-        }
-        if cfg.preview {
-            return self.dz_preview(title, artist, dz).await;
         }
         None
     }

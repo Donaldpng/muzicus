@@ -36,7 +36,7 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
-    /// audius | archive | preview
+    /// audius | archive
     pub provider: String,
     pub id: String,
     /// https URL of the audio file
@@ -45,7 +45,7 @@ pub struct Source {
     pub artist: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
-    /// false = 30-second preview only
+    /// Whether this source is a complete track.
     pub full: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<String>,

@@ -75,7 +75,6 @@ export const defaults: Settings = {
   sources: {
     audius: true,
     archive: true,
-    preview: true,
   },
 };
 
@@ -103,11 +102,10 @@ export async function loadSettings() {
         ...d,
         eq: { ...defaults.eq, ...d.eq },
         vis: { ...defaults.vis, ...d.vis },
-        // keep only current source switches (drops old SoundCloud/Jamendo keys)
+        // Keep only current source switches.
         sources: {
           audius: d.sources?.audius ?? defaults.sources.audius,
           archive: d.sources?.archive ?? defaults.sources.archive,
-          preview: d.sources?.preview ?? defaults.sources.preview,
         },
       });
     }

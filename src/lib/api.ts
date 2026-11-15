@@ -31,7 +31,6 @@ export function trackUrl(t: Track, downloaded: boolean): string | null {
 export const PROVIDERS: Record<string, string> = {
   audius: "Audius",
   archive: "Internet Archive",
-  preview: "Превью 30 с",
 };
 
 export const api = {
@@ -43,9 +42,12 @@ export const api = {
   ytResolve: (url: string) => invoke<Track>("yt_resolve", { url }),
   chart: () => invoke<Track[]>("chart"),
   suggest: (query: string) => invoke<string[]>("suggest", { query }),
-  radio: (t: Track) => invoke<Track[]>("radio", { dz: t.dz ?? null, artist: t.artist || null }),
+  radio: (t: Track) => {
+    if (!t.yt) return Promise.reject(new Error("Для рекомендаций нужен трек YouTube Music"));
+    return invoke<Track[]>("radio", { yt: t.yt });
+  },
   resolveSource: (t: Track) =>
-    invoke<Source | null>("resolve_source", { title: t.title, artist: t.artist, duration: t.duration ?? null, dz: t.dz ?? null }),
+    invoke<Source | null>("resolve_source", { title: t.title, artist: t.artist, duration: t.duration ?? null }),
   importPlaylist: (url: string) => invoke<ImportedPlaylist>("import_playlist", { url }),
   importText: (text: string) => invoke<Track[]>("import_text", { text }),
   lyrics: (t: Track) =>

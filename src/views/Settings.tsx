@@ -24,7 +24,7 @@ function SourcesCard() {
   const src = useSettings((s) => s.sources);
   const set = useSettings((s) => s.set);
   const up = (p: Partial<typeof src>) => set({ sources: { ...src, ...p } });
-  const Row = ({ k, name, desc }: { k: "audius" | "archive" | "preview"; name: string; desc: string }) => (
+  const Row = ({ k, name, desc }: { k: "audius" | "archive"; name: string; desc: string }) => (
     <div className="set-row">
       <div>
         <div style={{ fontWeight: 600 }}>{name}</div>
@@ -38,11 +38,10 @@ function SourcesCard() {
       <div className="card-head"><span className="label" style={{ color: "var(--ink)" }}>Источники музыки</span><div className="dots"><i /><i /><i /></div></div>
       <div style={{ padding: "6px 18px 14px" }}>
         <div className="muted" style={{ fontSize: 12, padding: "10px 0 4px" }}>
-          Каталог и поиск — Deezer. Полные версии треков ищутся на открытых площадках ниже, в порядке лучшего совпадения.
+          Каталог и поиск — YouTube Music. Дополнительные полные версии ищутся на открытых площадках ниже.
         </div>
         <Row k="audius" name="Audius" desc="Открытая платформа артистов, ключ не нужен" />
         <Row k="archive" name="Internet Archive" desc="Общественное достояние, архивы, концерты" />
-        <Row k="preview" name="Превью Deezer" desc="30 секунд, если полной версии нигде нет" />
       </div>
     </div>
   );

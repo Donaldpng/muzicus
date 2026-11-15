@@ -19,7 +19,7 @@ export interface Track {
 }
 
 export interface Source {
-  provider: "audius" | "archive" | "preview" | string;
+  provider: "audius" | "archive" | string;
   id: string;
   url: string;
   title: string;
@@ -32,7 +32,6 @@ export interface Source {
 export interface SourceConfig {
   audius: boolean;
   archive: boolean;
-  preview: boolean;
 }
 
 export type Repeat = "off" | "all" | "one";

@@ -92,16 +92,12 @@ async fn open_search(st: St<'_>, query: String) -> Result<Vec<Track>, String> {
 
 #[tauri::command]
 async fn chart(st: St<'_>) -> Result<Vec<Track>, String> {
-    st.sources.dz_chart().await
+    st.yt.chart().await
 }
 
 #[tauri::command]
-async fn radio(st: St<'_>, dz: Option<u64>, artist: Option<String>) -> Result<Vec<Track>, String> {
-    match (dz, artist) {
-        (Some(id), _) => st.sources.dz_radio(id).await,
-        (None, Some(a)) if !a.is_empty() => st.sources.dz_artist_top(a.split(',').next().unwrap_or(&a)).await,
-        _ => Err("нет данных для подборки".into()),
-    }
+async fn radio(st: St<'_>, yt: String) -> Result<Vec<Track>, String> {
+    st.yt.related(&yt).await
 }
 
 #[tauri::command]
@@ -126,9 +122,8 @@ async fn resolve_source(
     title: String,
     artist: String,
     duration: Option<u32>,
-    dz: Option<u64>,
 ) -> Result<Option<Source>, String> {
-    Ok(st.sources.resolve(&title, &artist, duration, dz).await)
+    Ok(st.sources.resolve(&title, &artist, duration).await)
 }
 
 #[tauri::command]

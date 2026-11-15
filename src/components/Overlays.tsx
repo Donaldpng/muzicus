@@ -64,7 +64,7 @@ function MenuInner() {
             <button onClick={act(() => { L.upsert([t]); downloadTrack(t); })}><I.download size={16} /> Скачать</button>
           )
         )}
-        {(t.dz || t.artist) && !t.local && (
+        {t.yt && !t.local && (
           <button onClick={act(async () => {
             try {
               const list = await api.radio(t);
