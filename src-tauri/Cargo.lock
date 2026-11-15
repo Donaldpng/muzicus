@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "muzicus"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "futures-util",
@@ -2509,6 +2509,7 @@ dependencies = [
  "rustypipe",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

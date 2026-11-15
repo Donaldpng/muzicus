@@ -28,6 +28,7 @@ export function Search() {
     query = query.trim();
     if (!query || /^https?:\/\//i.test(query)) return;
     useUi.getState().set({ searchQuery: query });
+    setErr("");
     setSugg([]);
     setFocus(false);
     input.current?.blur();
@@ -37,8 +38,27 @@ export function Search() {
     setBusy(true);
     setErr("");
     try {
-      const r = k === "open" ? await api.openSearch(query) : k === "internet" ? await api.ytSearch(query) : await api.search(query);
-      cache.set(key, r);
+      let r: Track[];
+      if (k === "tracks") {
+        const [deezer, internet] = await Promise.allSettled([api.search(query), api.ytSearch(query)]);
+        if (deezer.status === "rejected" && internet.status === "rejected") {
+          throw new Error(`Deezer: ${String(deezer.reason)}; YouTube: ${String(internet.reason)}`);
+        }
+        r = [
+          ...(deezer.status === "fulfilled" ? deezer.value : []),
+          ...(internet.status === "fulfilled" ? internet.value : []),
+        ];
+        if (my === seq.current && (deezer.status === "rejected" || internet.status === "rejected")) {
+          const provider = deezer.status === "rejected" ? "Deezer" : "YouTube / yt-dlp";
+          const reason = deezer.status === "rejected" ? deezer.reason : internet.status === "rejected" ? internet.reason : "";
+          setErr(`Не удалось выполнить поиск в ${provider}: ${String(reason)}`);
+        } else if (deezer.status === "fulfilled" && internet.status === "fulfilled") {
+          cache.set(key, r);
+        }
+      } else {
+        r = k === "open" ? await api.openSearch(query) : await api.ytSearch(query);
+        cache.set(key, r);
+      }
       if (my === seq.current) setResults(r);
     } catch (e) {
       if (my === seq.current) setErr(String(e));
@@ -77,7 +97,7 @@ export function Search() {
 
   return (
     <div className="page">
-      <div className="label" style={{ marginBottom: 6 }}>Search / Deezer + open sources</div>
+      <div className="label" style={{ marginBottom: 6 }}>Search / Deezer + YouTube + open sources</div>
       <h1 className="h1" style={{ marginBottom: 18 }}>Поиск</h1>
       <div className="search-box">
         <I.search className="lead" size={22} />
@@ -127,8 +147,8 @@ export function Search() {
         {kind === "open"
           ? "Audius и Internet Archive — бесплатные треки целиком, можно слушать и скачивать"
           : kind === "internet"
-            ? "Поиск по YouTube; для YouTube Music и других сайтов вставьте ссылку на трек. Требуется установленный yt-dlp."
-            : "Каталог Deezer. Полная версия ищется в открытых источниках при воспроизведении; если её нет — играет 30-секундное превью"}
+            ? "Поиск по YouTube; для YouTube Music и других сайтов вставьте ссылку на трек. На Windows yt-dlp загрузится автоматически при первом использовании."
+            : "Общий каталог: Deezer и YouTube. Полная версия также ищется в Audius и Internet Archive; если её нет — играет 30-секундное превью"}
       </div>
       {err && <div style={{ color: "var(--danger)", fontWeight: 600 }}>{err}</div>}
       {results && results.length > 0 && <TrackList tracks={results} ctx={{ type: "search" }} />}

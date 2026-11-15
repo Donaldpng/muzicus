@@ -10,6 +10,8 @@ use regex::Regex;
 use rustypipe::client::RustyPipe;
 use rustypipe::model::{Thumbnail, TrackItem, UrlTarget};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::process::Command;
 
 use crate::model::{pending_track, stable_id, ImportedPlaylist, Track};
@@ -17,6 +19,9 @@ use crate::model::{pending_track, stable_id, ImportedPlaylist, Track};
 pub struct Yt {
     pub rp: RustyPipe,
     ytdlp: PathBuf,
+    managed_ytdlp: bool,
+    http: reqwest::Client,
+    install_lock: AsyncMutex<()>,
     stream_cache: Mutex<HashMap<String, (Instant, StreamInfo)>>,
 }
 
@@ -27,6 +32,17 @@ pub struct StreamInfo {
 }
 
 static SIZE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"=w\d+-h\d+").unwrap());
+
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(serde::Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
 
 pub fn best_thumb(th: &[Thumbnail]) -> Option<String> {
     let t = th.iter().max_by_key(|t| t.width)?;
@@ -46,7 +62,8 @@ fn track_from_item(t: &TrackItem) -> Track {
 }
 
 impl Yt {
-    pub fn new(storage: std::path::PathBuf) -> Self {
+    pub fn new(storage: std::path::PathBuf, http: reqwest::Client) -> Self {
+        let install_dir = storage.clone();
         let rp = RustyPipe::builder()
             .storage_dir(storage)
             .no_reporter()
@@ -54,13 +71,123 @@ impl Yt {
             .timeout(Duration::from_secs(20))
             .build()
             .expect("rustypipe");
-        let ytdlp = std::env::var_os("MUZICUS_YTDLP")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("yt-dlp"));
-        Self { rp, ytdlp, stream_cache: Mutex::new(HashMap::new()) }
+        let configured_ytdlp = std::env::var_os("MUZICUS_YTDLP").map(PathBuf::from);
+        let managed_ytdlp = configured_ytdlp.is_none() && cfg!(target_os = "windows");
+        let ytdlp = configured_ytdlp.unwrap_or_else(|| {
+            if cfg!(target_os = "windows") {
+                install_dir.join("yt-dlp.exe")
+            } else {
+                PathBuf::from("yt-dlp")
+            }
+        });
+        Self {
+            rp,
+            ytdlp,
+            managed_ytdlp,
+            http,
+            install_lock: AsyncMutex::new(()),
+            stream_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn ensure_ytdlp(&self) -> Result<(), String> {
+        if self.ytdlp.is_file() {
+            return Ok(());
+        }
+        if !self.managed_ytdlp {
+            return Err(format!(
+                "yt-dlp не найден по пути {}. Установите yt-dlp либо задайте MUZICUS_YTDLP.",
+                self.ytdlp.display()
+            ));
+        }
+
+        let _guard = self.install_lock.lock().await;
+        if self.ytdlp.is_file() {
+            return Ok(());
+        }
+        self.install_ytdlp().await
+    }
+
+    async fn install_ytdlp(&self) -> Result<(), String> {
+        let release: GithubRelease = self
+            .http
+            .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| format!("Не удалось проверить выпуск yt-dlp: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("GitHub не вернул выпуск yt-dlp: {e}"))?
+            .json()
+            .await
+            .map_err(|e| format!("Не удалось прочитать выпуск yt-dlp: {e}"))?;
+
+        let asset_url = |name: &str| {
+            release
+                .assets
+                .iter()
+                .find(|asset| asset.name == name)
+                .map(|asset| asset.browser_download_url.as_str())
+                .filter(|url| url.starts_with("https://github.com/yt-dlp/yt-dlp/releases/download/"))
+                .ok_or_else(|| format!("В официальном выпуске yt-dlp отсутствует файл {name}"))
+        };
+        let binary_url = asset_url("yt-dlp.exe")?;
+        let sums_url = asset_url("SHA2-256SUMS")?;
+        let sums = self
+            .http
+            .get(sums_url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| format!("Не удалось загрузить контрольные суммы yt-dlp: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("Не удалось получить контрольные суммы yt-dlp: {e}"))?
+            .text()
+            .await
+            .map_err(|e| format!("Не удалось прочитать контрольные суммы yt-dlp: {e}"))?;
+        let expected = checksum_for(&sums, "yt-dlp.exe")
+            .ok_or_else(|| "В контрольных суммах yt-dlp.exe не найден".to_string())?;
+        let response = self
+            .http
+            .get(binary_url)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Не удалось скачать yt-dlp: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("Не удалось получить yt-dlp: {e}"))?;
+        if response.content_length().is_some_and(|size| size > 100 * 1024 * 1024) {
+            return Err("Размер yt-dlp.exe превышает допустимый предел".into());
+        }
+        let binary = response
+            .bytes()
+            .await
+            .map_err(|e| format!("Ошибка загрузки yt-dlp: {e}"))?;
+        if binary.is_empty() || binary.len() > 100 * 1024 * 1024 {
+            return Err("Размер скачанного yt-dlp.exe недопустим".into());
+        }
+        let actual = format!("{:x}", Sha256::digest(&binary));
+        if actual != expected {
+            return Err("Контрольная сумма yt-dlp.exe не совпала; файл не установлен".into());
+        }
+
+        let parent = self.ytdlp.parent().ok_or("Не удалось определить папку yt-dlp")?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Не удалось создать папку для yt-dlp: {e}"))?;
+        let temp = parent.join("yt-dlp.exe.download");
+        tokio::fs::write(&temp, &binary)
+            .await
+            .map_err(|e| format!("Не удалось сохранить yt-dlp.exe: {e}"))?;
+        if let Err(e) = tokio::fs::rename(&temp, &self.ytdlp).await {
+            let _ = tokio::fs::remove_file(&temp).await;
+            return Err(format!("Не удалось установить yt-dlp.exe: {e}"));
+        }
+        Ok(())
     }
 
     async fn run(&self, args: &[String]) -> Result<std::process::Output, String> {
+        self.ensure_ytdlp().await?;
         let mut command = Command::new(&self.ytdlp);
         command.args(args).kill_on_drop(true);
         let output = tokio::time::timeout(Duration::from_secs(60), command.output())
@@ -68,7 +195,7 @@ impl Yt {
             .map_err(|_| "yt-dlp превысил лимит ожидания 60 секунд".to_string())?
             .map_err(|e| {
                 format!(
-                    "Не удалось запустить yt-dlp ({}): {e}. Установите yt-dlp и добавьте его в PATH либо задайте MUZICUS_YTDLP.",
+                    "Не удалось запустить yt-dlp ({}): {e}. Установите yt-dlp либо задайте MUZICUS_YTDLP.",
                     self.ytdlp.display()
                 )
             })?;
@@ -295,6 +422,16 @@ impl Yt {
 
 }
 
+fn checksum_for(sums: &str, filename: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let checksum = fields.next()?;
+        let name = fields.next()?.trim_start_matches('*');
+        (name == filename && checksum.len() == 64 && checksum.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| checksum.to_ascii_lowercase())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +460,12 @@ mod tests {
         .expect("stream metadata");
         assert_eq!(info.url, "https://cdn.example/audio");
         assert_eq!(info.headers, vec![("Referer".into(), "https://example/".into())]);
+    }
+
+    #[test]
+    fn checksum_parser_selects_the_requested_asset() {
+        let sums = format!("{}  other.exe\n{} *yt-dlp.exe\n", "a".repeat(64), "B".repeat(64));
+        assert_eq!(checksum_for(&sums, "yt-dlp.exe"), Some("b".repeat(64)));
+        assert_eq!(checksum_for(&sums, "missing.exe"), None);
     }
 }

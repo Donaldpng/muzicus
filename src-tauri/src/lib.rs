@@ -461,7 +461,7 @@ pub fn run() {
                 .build()
                 .expect("http");
             let state = Arc::new(AppState {
-                yt: yt::Yt::new(data_dir.join("yt")),
+                yt: yt::Yt::new(data_dir.join("yt"), http.clone()),
                 sources: Sources::new(http.clone()),
                 data_dir,
                 http,
