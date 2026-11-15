@@ -142,7 +142,7 @@ export function EqPanel() {
         {EQ_FREQS.map((f, i) => (
           <div className="eq-band" key={f}>
             <b>{eq.gains[i] > 0 ? "+" : ""}{eq.gains[i]}</b>
-            <input type="range" min={-12} max={12} step={1} value={eq.gains[i]} onChange={(e) => setGain(i, parseInt(e.target.value))} />
+            <input type="range" min={-24} max={24} step={1} value={eq.gains[i]} onChange={(e) => setGain(i, parseInt(e.target.value))} />
             <span>{f >= 1000 ? f / 1000 + "k" : f}</span>
           </div>
         ))}
@@ -152,7 +152,7 @@ export function EqPanel() {
           <span className="label">Предусилитель</span>
           <span className="seg" style={{ fontSize: 12 }}>{eq.preamp > 0 ? "+" : ""}{eq.preamp}</span>
         </div>
-        <Range min={-12} max={12} step={1} value={eq.preamp} onChange={(v) => set({ eq: { ...eq, preamp: v } })} />
+        <Range min={-24} max={24} step={1} value={eq.preamp} onChange={(v) => set({ eq: { ...eq, preamp: v } })} />
       </div>
       <SpeedControl rate={rate} pitch={pitch} />
     </div>

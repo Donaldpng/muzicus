@@ -17,6 +17,7 @@ import "./styles.css";
 import App from "./App";
 import { initApi, isMobile } from "./lib/api";
 import { loadLibrary } from "./store/library";
+import { restorePlayback } from "./store/player";
 import { loadSettings } from "./store/settings";
 
 const seg = new FontFace("DSEG7", `url(${segUrl})`, { weight: "700" });
@@ -26,6 +27,7 @@ seg.load().then((f) => document.fonts.add(f)).catch(() => {});
   await initApi();
   if (isMobile()) document.documentElement.classList.add("is-mobile");
   await Promise.all([loadSettings(), loadLibrary()]);
+  await restorePlayback();
   if (import.meta.env.DEV) {
     const [{ usePlayer }, { useLib }, { useUi }, { engine }] = await Promise.all([
       import("./store/player"),

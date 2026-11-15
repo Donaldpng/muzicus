@@ -200,6 +200,7 @@ export function useCurrentTrack(): Track | undefined {
 // ---------------------------------------------------------------- loading
 let loadSeq = 0;
 let playingSource: string | null = null;
+let loadedTrackId: string | null = null;
 const resolving = new Map<string, Promise<Track | null>>();
 
 const PROVIDERS_OK = new Set(["audius", "archive"]);
@@ -232,13 +233,14 @@ export async function ensurePlayable(t: Track, force = false): Promise<Track | n
   return p;
 }
 
-async function load(autoplay: boolean) {
+async function load(autoplay: boolean, startAt = 0) {
   const seq = ++loadSeq;
   const t0 = currentTrack();
   const a = engine.audio;
   if (!t0) return;
+  loadedTrackId = null;
   engine.ensureGraph();
-  usePlayer.setState({ loading: true, position: 0, duration: t0.duration ?? 0, buffered: 0 });
+  usePlayer.setState({ loading: true, position: startAt, duration: t0.duration ?? 0, buffered: 0 });
   a.pause();
   const t = await ensurePlayable(t0);
   if (seq !== loadSeq) return;
@@ -260,9 +262,28 @@ async function load(autoplay: boolean) {
         : t!.src?.provider ?? null;
   usePlayer.setState({ sourceLabel: playingSource });
   a.src = url;
+  loadedTrackId = t0.id;
   a.playbackRate = useSettings.getState().rate;
   useLib.getState().pushHistory(t0.id);
   updateMediaSession(t);
+  if (startAt > 0) {
+    if (a.readyState < HTMLMediaElement.HAVE_METADATA) {
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          window.clearTimeout(timeout);
+          a.removeEventListener("loadedmetadata", done);
+          a.removeEventListener("error", done);
+          resolve();
+        };
+        const timeout = window.setTimeout(done, 10000);
+        a.addEventListener("loadedmetadata", done, { once: true });
+        a.addEventListener("error", done, { once: true });
+      });
+    }
+    if (seq !== loadSeq || a.error) return;
+    a.currentTime = Math.min(startAt, isFinite(a.duration) ? a.duration : startAt);
+    usePlayer.setState({ position: a.currentTime });
+  }
   if (autoplay) a.play().catch((e) => console.warn("play", e));
   prefetchNext();
 }
@@ -336,6 +357,169 @@ a.addEventListener("error", () => {
   toast(`Ошибка воспроизведения${t ? ": " + t.title : ""}`, "err");
   skipOnError(loadSeq);
 });
+
+// ---------------------------------------------------------------- playback persistence
+interface PersistedPlayback {
+  version: 1;
+  queue: string[];
+  original: string[];
+  index: number;
+  context: QueueContext | null;
+  shuffle: boolean;
+  repeat: Repeat;
+  position: number;
+  wasPlaying: boolean;
+  tracks: Track[];
+}
+
+function isQueueContext(value: unknown): value is QueueContext | null {
+  if (value === null) return true;
+  if (!value || typeof value !== "object" || !("type" in value)) return false;
+  const context = value as { type: unknown; id?: unknown };
+  if (context.type === "playlist") return typeof context.id === "string";
+  return ["liked", "downloads", "local", "search", "radio", "history", "single"].includes(String(context.type));
+}
+
+function isPersistedPlayback(value: unknown): value is PersistedPlayback {
+  if (!value || typeof value !== "object") return false;
+  const saved = value as Partial<PersistedPlayback>;
+  return (
+    saved.version === 1 &&
+    Array.isArray(saved.queue) &&
+    saved.queue.every((id) => typeof id === "string") &&
+    Array.isArray(saved.original) &&
+    saved.original.every((id) => typeof id === "string") &&
+    Number.isInteger(saved.index) &&
+    typeof saved.shuffle === "boolean" &&
+    ["off", "all", "one"].includes(String(saved.repeat)) &&
+    typeof saved.position === "number" &&
+    isFinite(saved.position) &&
+    saved.position >= 0 &&
+    typeof saved.wasPlaying === "boolean" &&
+    Array.isArray(saved.tracks) &&
+    saved.tracks.every(
+      (track) =>
+        !!track &&
+        typeof track.id === "string" &&
+        typeof track.title === "string" &&
+        typeof track.artist === "string" &&
+        typeof track.source === "string",
+    ) &&
+    isQueueContext(saved.context)
+  );
+}
+
+let persistenceStarted = false;
+let persistenceTimer: number | undefined;
+let lastPositionSave = 0;
+let persistenceWrite = Promise.resolve();
+
+function playbackSnapshot(): PersistedPlayback {
+  const state = usePlayer.getState();
+  const lib = useLib.getState();
+  const trackIds = Array.from(new Set([...state.queue, ...state.original]));
+  const tracks = trackIds.map((id) => lib.tracks[id]).filter((track): track is Track => !!track);
+  const position =
+    loadedTrackId === state.queue[state.index] && engine.audio.readyState >= HTMLMediaElement.HAVE_METADATA
+      ? engine.audio.currentTime
+      : state.position;
+  return {
+    version: 1,
+    queue: state.queue,
+    original: state.original,
+    index: state.index,
+    context: state.context,
+    shuffle: state.shuffle,
+    repeat: state.repeat,
+    position: isFinite(position) ? Math.max(0, position) : 0,
+    wasPlaying: state.playing,
+    tracks,
+  };
+}
+
+function schedulePlaybackSave(delay = 0) {
+  if (!persistenceStarted || persistenceTimer !== undefined) return;
+  persistenceTimer = window.setTimeout(() => {
+    persistenceTimer = undefined;
+    const snapshot = JSON.stringify(playbackSnapshot());
+    persistenceWrite = persistenceWrite
+      .catch((e) => console.error("save playback state", e))
+      .then(() => api.saveState("player", snapshot))
+      .catch((e) => console.error("save playback state", e));
+  }, delay);
+}
+
+function startPlaybackPersistence() {
+  if (persistenceStarted) return;
+  persistenceStarted = true;
+  usePlayer.subscribe((state, previous) => {
+    if (
+      state.queue !== previous.queue ||
+      state.original !== previous.original ||
+      state.index !== previous.index ||
+      state.context !== previous.context ||
+      state.shuffle !== previous.shuffle ||
+      state.repeat !== previous.repeat ||
+      state.playing !== previous.playing
+    )
+      schedulePlaybackSave();
+  });
+  a.addEventListener("play", () => schedulePlaybackSave());
+  a.addEventListener("pause", () => schedulePlaybackSave());
+  a.addEventListener("seeked", () => schedulePlaybackSave());
+  a.addEventListener("ended", () => schedulePlaybackSave());
+  a.addEventListener("timeupdate", () => {
+    if (Date.now() - lastPositionSave < 2000) return;
+    lastPositionSave = Date.now();
+    schedulePlaybackSave();
+  });
+}
+
+export async function restorePlayback() {
+  try {
+    const raw = await api.loadState("player");
+    if (raw) {
+      const value: unknown = JSON.parse(raw);
+      if (isPersistedPlayback(value) && value.queue.length) {
+        const lib = useLib.getState();
+        lib.upsert(value.tracks);
+        const loadedLib = useLib.getState();
+        const queue = value.queue.filter((id) => {
+          const track = loadedLib.tracks[id];
+          return !!track && (!track.local || loadedLib.localIds.includes(id) || loadedLib.downloads[id]);
+        });
+        if (queue.length) {
+          const original = value.original.filter((id) => queue.includes(id));
+          const savedId = value.queue[value.index];
+          const nextId = queue.includes(savedId)
+            ? savedId
+            : value.queue.slice(Math.max(0, value.index + 1)).find((id) => queue.includes(id)) ?? queue[0];
+          const context =
+            value.context?.type === "playlist" && !loadedLib.playlists.some((playlist) => playlist.id === value.context?.id)
+              ? { type: "single" as const }
+              : value.context;
+          const state = {
+            queue,
+            original: original.length ? original : queue.slice(),
+            index: queue.indexOf(nextId),
+            context,
+            shuffle: value.shuffle,
+            repeat: value.repeat,
+            position: value.position,
+            playing: value.wasPlaying,
+          };
+          usePlayer.setState(state);
+          startPlaybackPersistence();
+          void load(value.wasPlaying, value.position);
+          return;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("restore playback state", e);
+  }
+  startPlaybackPersistence();
+}
 
 // ---------------------------------------------------------------- media session (SMTC / media keys)
 function updateMediaSession(t: Track) {
